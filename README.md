@@ -51,6 +51,14 @@ python server.py
 `video/` に `1号機.mp4`〜`5号機.mp4`・`全体カメラ.mp4` を配置（[`video/README.md`](video/README.md)）。
 無い場合は画面上で「映像 No Connect」プレースホルダーが出ます（レイアウトは確認可能）。
 
+### 4. 実機カメラ映像（WebRTC・任意）
+
+機体上カメラのリアルタイム映像を出す場合は、別プロジェクトの WebRTC 中継サーバー
+（`ClaudeShareContents/webrtc-camera`・Go・ポート 8080）を起動し、**マスターモードで
+映像ソースを「WebRTC」に切替**えます。号機 1〜5 がカメラ ID `RES1`〜`RES5` に対応します。
+中継先はマスターで指定（空なら画面ホストの 8080 を自動推定）。詳細は
+[`docs/STATE_AND_PROTOCOL.md`](docs/STATE_AND_PROTOCOL.md) の「映像」節。
+
 ---
 
 ## 構成

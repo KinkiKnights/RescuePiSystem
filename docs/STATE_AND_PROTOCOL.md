@@ -20,6 +20,8 @@
 | `units` | `{1..5: {...}}` | 機体ごとの状態（下表） |
 | `room_units` | `{A,B,C: int}` | 部屋に対応する号機。`0` = 未割当。**1 機体は 1 部屋のみ** |
 | `room_analysis` | `{A,B,C: {...}}` | 部屋ごとの解析結果（下表）。control / analytics / reporter が共有 |
+| `video_mode` | `"file"`/`"webrtc"` | 映像ソース。`file`=動画ファイル / `webrtc`=機体上カメラ中継 |
+| `webrtc_server` | str | WebRTC中継先。空なら `ws://<host>:8080/ws` を自動推定。`host[:port]` か `ws://…/ws` |
 | `analysis` | `{stove,injury,color,audio,pattern,notes,status}` | 旧・全体解析データ（master のプリセット投入用。現行 UI ではほぼ未使用） |
 | `master_overlay` | `{visible, title, lines}` | アナリティクス画面への撮影指示オーバーレイ |
 | `analysis_request` | `{pending, unit, timestamp}` | エンジニア→アナリティクスの解析要請 |
@@ -116,6 +118,8 @@ ws://<host>:8765/ws/<role>
 | `hide_overlay` | — | オーバーレイを消す |
 | `set_analysis` | `preset{}`, `status` | 旧・全体解析データを一括投入 |
 | `set_analytics_target` | `unit` | 解析対象号機を変更 |
+| `set_video_mode` | `mode` | 映像ソースを切替（`"file"`/`"webrtc"`） |
+| `set_webrtc_server` | `server` | WebRTC中継先を設定（空で自動推定） |
 | `complete_task` | `task_id` | 指定タスクを完了 |
 | `complete_next` | `room` | その部屋（空文字=共通）の未完了タスクを 1 つ完了 |
 | `reset` | — | 全状態を初期値へリセット |
@@ -128,3 +132,17 @@ ws://<host>:8765/ws/<role>
 
 操作画面サーバーとは独立した `voice_comm/server.py` が中継します。
 プロトコルの詳細は [`../voice_comm/README.md`](../voice_comm/README.md) を参照。
+
+---
+
+## 5. 映像（file / WebRTC）
+
+各画面のカメラ映像は `video_mode` で 2 系統を切替えます（マスターモードから操作）。
+
+- **file**: `video/<号機>.mp4` をループ再生（既定。素材が無ければ「No Connect」表示）。
+- **webrtc**: 機体上カメラの WebRTC 中継。号機 `n` → カメラ ID **`RES<n>`**（RES1〜RES5）。
+  - 中継サーバー（SFU）は**別プロジェクト** `ClaudeShareContents/webrtc-camera`（Go・既定ポート 8080）。
+    このアプリには含まれないため別途起動が必要。
+  - 視聴クライアントは `static/webrtc-camera.js`（`new WebRTCCamera({server}).connect(videoEl, "RES1")`）。
+  - 中継先は `webrtc_server`（空なら `ws://<画面を開いたホスト>:8080/ws` を自動推定）。
+  - 全体カメラ（overview）は WebRTC 非対応で、webrtc モードでも `video/全体カメラ.mp4` を表示。
