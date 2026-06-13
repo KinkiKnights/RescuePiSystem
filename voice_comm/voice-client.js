@@ -138,6 +138,9 @@
   /* ---------- 受信音声の再生 ---------- */
 
   function handleBinary(buf) {
+    // 送話中は受話しない（半二重）。自分の声が別端末経由で戻ってくる
+    // ループバックを防ぐ。送話を止めれば通常どおり受話する。
+    if (talking) return;
     if (buf.byteLength < 3) return;
     const senderId = new Uint8Array(buf, 0, 1)[0];
     const pcm = new Int16Array(buf.slice(1));
@@ -281,7 +284,9 @@
       text = "音声: 未接続";
     } else if (micError) {
       cls += " is-error";
-      text = "音声: マイク不可";
+      text = location.protocol === "https:"
+        ? "音声: マイク不可"
+        : "音声: マイク不可（HTTPSが必要）";
     } else if (talking) {
       cls += " is-talking";
       text = "送話中 — " + role;

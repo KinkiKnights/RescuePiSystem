@@ -492,7 +492,25 @@ async def websocket_endpoint(websocket: WebSocket, role: str) -> None:
         connections["all"].discard(websocket)
 
 
+def _ssl_args() -> dict[str, str]:
+    """certs/cert.pem と certs/key.pem があれば HTTPS で起動する。
+
+    iOS Safari は localhost 以外ではマイク利用に HTTPS(セキュアコンテキスト)が
+    必須。自己署名証明書は `python make_cert.py` で生成できる（環境変数
+    SSL_CERT / SSL_KEY でパス上書き可）。
+    """
+    import os
+
+    cert = os.environ.get("SSL_CERT") or str(BASE_DIR / "certs" / "cert.pem")
+    key = os.environ.get("SSL_KEY") or str(BASE_DIR / "certs" / "key.pem")
+    if Path(cert).exists() and Path(key).exists():
+        print(f"[HTTPS] {cert} / {key} を使用します（https://<host>:8765/）")
+        return {"ssl_certfile": cert, "ssl_keyfile": key}
+    print("[HTTP] 証明書が無いため HTTP で起動します（iPhoneのマイクは不可）")
+    return {}
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8765, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8765, reload=True, **_ssl_args())

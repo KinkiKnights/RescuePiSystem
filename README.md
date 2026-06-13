@@ -46,6 +46,22 @@ python server.py
 詳細は [`voice_comm/README.md`](voice_comm/README.md)。マイクはブラウザの制約で
 **localhost か HTTPS でのみ**利用可能（LAN の他端末で使う場合の回避策は同 README 参照）。
 
+#### iPhone など LAN の他端末で送話を使う（HTTPS）
+
+iOS Safari は localhost 以外ではマイク利用に **HTTPS（セキュアコンテキスト）が必須**で、
+http のままだと「マイク不可（HTTPSが必要）」になります。自己署名証明書で HTTPS 起動します。
+
+```
+pip install cryptography
+python make_cert.py            # certs/cert.pem, certs/key.pem を生成（LAN IP を自動検出）
+python main.py                 # 証明書があれば自動的に HTTPS で起動
+python voice_comm/server.py    # 音声サーバーも同じ certs/ を使い WSS になる
+```
+
+iPhone で `https://<このPCのIP>:8765/reporter` を開き、証明書の警告を許可（または
+`certs/cert.pem` を構成プロファイルとして信頼）すると送話できます。
+証明書は `make_cert.py` で各自生成（`certs/` は Git 管理外）。
+
 ### 3. 動画素材
 
 `video/` に `1号機.mp4`〜`5号機.mp4`・`全体カメラ.mp4` を配置（[`video/README.md`](video/README.md)）。

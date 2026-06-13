@@ -121,6 +121,18 @@ async def voice_endpoint(websocket: WebSocket, role: str = "unknown") -> None:
 
 
 if __name__ == "__main__":
+    import os
+    from pathlib import Path
+
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    # 操作画面サーバーと同じ certs/ を共有（プロジェクト直下）。
+    # 証明書があれば wss(HTTPS) で起動する。SSL_CERT / SSL_KEY で上書き可。
+    base = Path(__file__).resolve().parent.parent
+    cert = os.environ.get("SSL_CERT") or str(base / "certs" / "cert.pem")
+    key = os.environ.get("SSL_KEY") or str(base / "certs" / "key.pem")
+    ssl_args = {}
+    if Path(cert).exists() and Path(key).exists():
+        ssl_args = {"ssl_certfile": cert, "ssl_keyfile": key}
+        print(f"[WSS] {cert} を使用します")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, **ssl_args)
