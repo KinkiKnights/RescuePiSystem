@@ -67,6 +67,9 @@ webrtc-camera/
 │   └── publish-test.sh    #   このPCでの動作確認用 (Webカメラ/videotestsrc)
 ├── tools/
 │   └── headless-viewer/   # ブラウザ無しで配信経路を検証するテスト用視聴クライアント
+├── setup/
+│   ├── setup-relay.sh     # 中継PCセットアップ (Go導入/ビルド/任意でsystemd)
+│   └── setup-pi.sh        # ラズパイセットアップ (依存導入/検証/任意でsystemd)
 └── README.md
 ```
 
@@ -87,12 +90,33 @@ const ids = await cam.listPis();     // 接続中のPi ID一覧
 cam.disconnect();
 ```
 
-## 必要パッケージ
+## セットアップ（ワンライナー）
 
-中継サーバー(ビルド/実行):
+依存（Go / GStreamer等）が未導入の素のUbuntu 24.04でも、以下を実行すれば
+依存導入→リポジトリ取得→ビルド/検証まで自動で行う（`setup/` のスクリプトを取得して実行）。
+
+**中継PC（SFU）**:
 ```bash
-sudo apt install golang-go
+curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-relay.sh | bash
+# systemdで常駐させる場合:
+curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-relay.sh | bash -s -- --service
 ```
+- Goが無ければ公式版を自動導入（amd64/arm64対応）。
+
+**Raspberry Pi（パブリッシャ）**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-pi.sh | bash
+# 中継PCを指定し systemd常駐 (Pi4=HW):
+curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-pi.sh \
+  | PI_ID=PI01 SERVER=ws://<中継PCのIP>:8080/ws MODEL=pi4 bash -s -- --service
+```
+- GStreamer(webrtcbin/HWエンコード)とPython依存を導入し、`webrtcbin`が使えるか自動検証。
+
+> どちらも環境変数で `INSTALL_DIR` / `REPO_URL` などを上書き可。詳細は `setup/*.sh` 冒頭のコメント参照。
+
+### 手動で導入する場合の必要パッケージ
+
+中継サーバー(ビルド/実行): `golang-go`（または公式Go）
 
 パブリッシャ(Pi側):
 ```bash
