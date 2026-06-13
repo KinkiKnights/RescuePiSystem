@@ -44,6 +44,7 @@
 |---|---|---|
 | `stove` | str | ストーブ有無（`""`/`"不明"`/`"無し"`/`"有り"`） |
 | `stoveDone` | bool | ストーブ項目の確定フラグ |
+| `qr` | str | 負傷QR読取テキスト（例 `"右足負傷"`）。control/analytics がメイン映像をQR解析して取得 |
 | `injuryDone` | bool | 負傷（QR）項目の確定フラグ |
 | `color` | str | 顔色（`""`/`"不明"`/`"黒"`/`"赤"`/`"緑"`/`"青"`/`"黄"`/`"紫"`/`"水"`/`"白"`） |
 | `colorDone` | bool | 顔色項目の確定フラグ |
@@ -84,7 +85,7 @@ ws://<host>:8765/ws/<role>
 | `accept_control_request` | — | 保留中の割り込み要請を承諾（カメラ・操縦を切替） |
 | `accept_analysis_request` | — | 保留中の解析要請を承諾（解析対象を切替） |
 | `update_analysis` | `analysis` の各キー | 旧・全体解析データを更新 |
-| `set_room_analysis` | `room`, （`stove`/`color`/`notes`/`stoveDone`/`injuryDone`/`colorDone`） | 部屋ごとの解析を更新（送られたキーのみ） |
+| `set_room_analysis` | `room`, （`stove`/`color`/`notes`/`qr`/`stoveDone`/`injuryDone`/`colorDone`） | 部屋ごとの解析を更新（送られたキーのみ） |
 | `complete_task` | `task_id` | 該当タスクを完了に |
 | `reporter_cue` | `room`, `text` | 報告キュー由来の通知（`[ルームX] text`） |
 

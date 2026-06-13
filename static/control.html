@@ -439,6 +439,7 @@
       <span class="key-banner__item"><kbd>Enter</kbd>操縦要請の承諾</span>
     </footer>
   </div>
+  <script src="/static/jsqr.js"></script>
   <script src="/static/webrtc-camera.js"></script>
   <script src="/static/common.js"></script>
   <script>
@@ -520,12 +521,14 @@
       const colorBtns = document.getElementById("colorBtns");
       const qrConfirm = document.getElementById("qrConfirm");
       const colorConfirm = document.getElementById("colorConfirm");
+      const qrStatus = document.getElementById("qrStatus");
       let analysisRoom = "A";
 
       function emptyRoom() {
-        return { stove: "", stoveDone: false, injuryDone: false, color: "", colorDone: false, notes: "" };
+        return { stove: "", stoveDone: false, qr: "", injuryDone: false, color: "", colorDone: false, notes: "" };
       }
       let roomAnalysis = { A: emptyRoom(), B: emptyRoom(), C: emptyRoom() };
+      const qrDetectedAt = { A: 0, B: 0, C: 0 };
       function curRoom() { return roomAnalysis[analysisRoom]; }
       function pushRoom(fields) {
         const payload = { type: "set_room_analysis", room: analysisRoom };
@@ -552,12 +555,32 @@
         btn.textContent = done ? "撤回する" : "確定する";
         btn.classList.toggle("is-confirmed", done);
       }
+      function renderQr() {
+        const s = curRoom();
+        const ago = qrDetectedAt[analysisRoom]
+          ? "（最終検出 " + RC.formatAgo(qrDetectedAt[analysisRoom]) + "）"
+          : "";
+        qrStatus.textContent = s.qr ? s.qr + ago : "読み取り中";
+      }
       function renderAnalysisTab() {
         renderColorButtons();
+        renderQr();
         renderConfirm(qrConfirm, curRoom().injuryDone);
         renderConfirm(colorConfirm, curRoom().colorDone);
       }
       renderAnalysisTab();
+      setInterval(renderQr, 1000);
+
+      /* メイン映像（操作機カメラ）をリアルタイムQR解析 */
+      RC.createQrScanner(
+        function () { return mainVideo.querySelector("video"); },
+        function (text) {
+          curRoom().qr = text;
+          qrDetectedAt[analysisRoom] = Date.now();
+          renderQr();
+        },
+        700
+      );
 
       analysisRooms.addEventListener("click", function (e) {
         const btn = e.target.closest(".room-btn");
@@ -578,7 +601,8 @@
       qrConfirm.addEventListener("click", function () {
         curRoom().injuryDone = !curRoom().injuryDone;
         renderConfirm(qrConfirm, curRoom().injuryDone);
-        pushRoom({ injuryDone: curRoom().injuryDone });
+        // 確定するまで QR テキストは他クライアントへ送らない
+        pushRoom({ qr: curRoom().qr, injuryDone: curRoom().injuryDone });
       });
       colorConfirm.addEventListener("click", function () {
         curRoom().colorDone = !curRoom().colorDone;

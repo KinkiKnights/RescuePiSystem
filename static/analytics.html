@@ -357,10 +357,14 @@
             </div>
 
             <div class="ana-block">
-              <p class="ana-block__label">負傷状況</p>
+              <p class="ana-block__label">負傷状況（メイン映像をQR解析）</p>
               <div class="ana-row">
                 <span class="ana-row__label">QR：</span>
-                <span class="ana-row__value">読み取り中</span>
+                <span class="ana-row__value" id="qrValue">読み取り中</span>
+              </div>
+              <div class="ana-row">
+                <span class="ana-row__label">最終検出：</span>
+                <span class="ana-row__value" id="qrAgo">—</span>
               </div>
               <button type="button" class="confirm2 confirm2--wide" data-confirm="injury">結果確定</button>
             </div>
@@ -387,6 +391,7 @@
       <ul id="overlayLines"></ul>
     </div>
   </div>
+  <script src="/static/jsqr.js"></script>
   <script src="/static/webrtc-camera.js"></script>
   <script src="/static/common.js"></script>
   <script>
@@ -462,9 +467,10 @@
       const COLOR_OPTIONS = RC.COLOR_OPTIONS;
 
       function emptyRoom() {
-        return { stove: "", stoveDone: false, injuryDone: false, color: "", colorDone: false, notes: "" };
+        return { stove: "", stoveDone: false, qr: "", injuryDone: false, color: "", colorDone: false, notes: "" };
       }
       let roomAnalysis = { A: emptyRoom(), B: emptyRoom(), C: emptyRoom() };
+      const qrDetectedAt = { A: 0, B: 0, C: 0 };
       let activeRoom = "A";
       function cur() { return roomAnalysis[activeRoom]; }
       function pushRoom(fields) {
@@ -480,6 +486,8 @@
       const injuryConfirm = document.querySelector('[data-confirm="injury"]');
       const colorConfirm = document.querySelector('[data-confirm="color"]');
       const notesUpdate = document.getElementById("notesUpdate");
+      const qrValue = document.getElementById("qrValue");
+      const qrAgo = document.getElementById("qrAgo");
 
       function confirmBtn(btn, done) {
         btn.textContent = done ? "撤回する" : "確定する";
@@ -512,7 +520,16 @@
         }).join("");
         confirmBtn(colorConfirm, s.colorDone);
       }
-      function renderInjury() { confirmBtn(injuryConfirm, cur().injuryDone); }
+      function renderInjury() {
+        const s = cur();
+        qrValue.innerHTML = s.qr ? RC.escapeHtml(s.qr) : '<span style="color:var(--muted)">読み取り中</span>';
+        confirmBtn(injuryConfirm, s.injuryDone);
+        renderQrAgo();
+      }
+      function renderQrAgo() {
+        qrAgo.textContent = qrDetectedAt[activeRoom] ? RC.formatAgo(qrDetectedAt[activeRoom]) : "—";
+      }
+      setInterval(renderQrAgo, 1000);
       function renderNotes() {
         if (document.activeElement !== notesArea) notesArea.value = cur().notes;
       }
@@ -557,8 +574,22 @@
       injuryConfirm.addEventListener("click", function () {
         cur().injuryDone = !cur().injuryDone;
         renderInjury();
-        pushRoom({ injuryDone: cur().injuryDone });
+        // 確定するまで QR テキストは他クライアントへ送らない
+        pushRoom({ qr: cur().qr, injuryDone: cur().injuryDone });
       });
+
+      /* メイン映像（中央の大きいビュー）をリアルタイムQR解析 */
+      function mainStageVideo() {
+        const sel = stage.dataset.sel;
+        if (sel === "ten") return viewTen.querySelector("video");
+        if (sel === "target") return viewTarget.querySelector("video");
+        return null; // 音声解析タブには映像なし
+      }
+      RC.createQrScanner(mainStageVideo, function (text) {
+        cur().qr = text;
+        qrDetectedAt[activeRoom] = Date.now();
+        renderInjury();
+      }, 700);
       colorConfirm.addEventListener("click", function () {
         cur().colorDone = !cur().colorDone;
         renderColor();

@@ -189,6 +189,81 @@
     });
   }
 
+  /* ---------- QR 解析（カメラ映像から自動読取） ---------- */
+
+  // getVideo() で対象 <video> を返すと、一定間隔で QR を読取り onDetect(text) を呼ぶ。
+  // BarcodeDetector 非対応ブラウザでは何もしない（supported:false）。
+  function createQrScanner(getVideo, onDetect, intervalMs) {
+    // 1) ブラウザ標準 BarcodeDetector（あれば最優先）
+    let detector = null;
+    if ("BarcodeDetector" in global) {
+      try {
+        detector = new global.BarcodeDetector({ formats: ["qr_code"] });
+      } catch (e) {
+        detector = null;
+      }
+    }
+    // 2) フォールバック: jsQR（static/jsqr.js）
+    const useJsqr = !detector && typeof global.jsQR === "function";
+    let canvas = null, ctx = null;
+
+    function scanWithJsqr(video) {
+      const w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) return;
+      if (!canvas) {
+        canvas = document.createElement("canvas");
+        ctx = canvas.getContext("2d", { willReadFrequently: true });
+      }
+      const scale = Math.min(1, 640 / w); // 処理軽量化のため縮小
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      let img;
+      try {
+        img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        return; // クロスオリジンで汚染されている等
+      }
+      const code = global.jsQR(img.data, img.width, img.height);
+      if (code && code.data) onDetect(code.data);
+    }
+
+    let busy = false;
+    const timer = setInterval(function () {
+      const video = getVideo();
+      if (!video || video.readyState < 2 || !video.videoWidth) return;
+      if (detector) {
+        if (busy) return;
+        busy = true;
+        detector
+          .detect(video)
+          .then(function (codes) {
+            if (codes && codes.length && codes[0].rawValue) onDetect(codes[0].rawValue);
+          })
+          .catch(function () {})
+          .then(function () { busy = false; });
+      } else if (useJsqr) {
+        scanWithJsqr(video);
+      }
+    }, intervalMs || 700);
+
+    return {
+      supported: !!detector || useJsqr,
+      method: detector ? "BarcodeDetector" : useJsqr ? "jsQR" : "none",
+      stop: function () { clearInterval(timer); },
+    };
+  }
+
+  // 経過時間を「たった今 / N秒前 / N分M秒前」表記にする。
+  function formatAgo(ts) {
+    if (!ts) return "—";
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 1) return "たった今";
+    if (s < 60) return s + "秒前";
+    const m = Math.floor(s / 60);
+    return m + "分" + (s % 60) + "秒前";
+  }
+
   function createWsClient(role, handlers) {
     let socket = null;
     let reconnectTimer = 0;
@@ -381,6 +456,8 @@
     setConnBadge: setConnBadge,
     renderTasks: renderTasks,
     createNotifier: createNotifier,
+    createQrScanner: createQrScanner,
+    formatAgo: formatAgo,
     ROOM_NAMES: ROOM_NAMES,
     COLOR_OPTIONS: COLOR_OPTIONS,
     COLORS: COLORS,

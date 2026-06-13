@@ -275,7 +275,7 @@
         A: emptyA(), B: emptyA(), C: emptyA(),
       };
       function emptyA() {
-        return { stove: "", stoveDone: false, injuryDone: false, color: "", colorDone: false, notes: "" };
+        return { stove: "", stoveDone: false, qr: "", injuryDone: false, color: "", colorDone: false, notes: "" };
       }
 
       /* 報告状態（この端末ローカル）: reportState[room][key] = {reported, updated, sig} */
@@ -288,7 +288,7 @@
       function sigOf(a, key) {
         if (!a) return "";
         if (key === "stove") return (a.stove || "") + "|" + (a.stoveDone ? "1" : "0");
-        if (key === "injury") return a.injuryDone ? "1" : "0";
+        if (key === "injury") return (a.qr || "") + "|" + (a.injuryDone ? "1" : "0");
         if (key === "color") return (a.color || "") + "|" + (a.colorDone ? "1" : "0");
         if (key === "notes") return a.notes || "";
         return "";
@@ -296,7 +296,7 @@
 
       function itemValueHtml(a, key) {
         if (key === "stove") return a.stove ? esc(a.stove) : "—";
-        if (key === "injury") return a.injuryDone ? "確定" : '<span class="muted">読み取り中</span>';
+        if (key === "injury") return a.qr ? esc(a.qr) : '<span class="muted">読み取り中</span>';
         if (key === "color") {
           if (!a.color) return "—";
           const hex = COLOR_HEX[a.color] || "#888888";

@@ -87,6 +87,13 @@
         <p class="video-mode-hint" id="videoModeHint">現在: 動画ファイル（1〜5号機 → カメラID RES1〜RES5）</p>
       </section>
       <section>
+        <h2 class="section-title">デモ（報告者モード撮影用）</h2>
+        <div class="btn-grid">
+          <button type="button" class="btn btn--wide" id="demoToggle">デモ開始</button>
+        </div>
+        <p class="video-mode-hint">押すと各ルームの解析（ストーブ・負傷QR・顔色・備考）が順に入力されていきます。負傷QRは「右足負傷」等。マスター画面内のみで完結し、他ツールへは通常の解析データとして反映されます。</p>
+      </section>
+      <section>
         <h2 class="section-title">アナリティクス — 解析データ投入</h2>
         <div class="btn-grid">
           <button type="button" class="btn" data-preset="A">ルームA 解析セット</button>
@@ -230,6 +237,69 @@
         const v = relayInput.value.trim();
         postMaster({ action: "set_webrtc_server", server: v });
         log("WebRTC中継先 → " + (v || "(自動推定)"));
+      });
+
+      /* ---- デモ（報告者モード撮影用） ----
+         マスター画面のみで完結。WebSocket で set_room_analysis を順次送り、
+         各ルームの解析データを「入力されていく」様子を再現する。 */
+      const demoToggle = document.getElementById("demoToggle");
+      const DEMO_STEPS = [
+        { room: "A", stove: "有り", stoveDone: true },
+        { room: "A", qr: "右足負傷", injuryDone: true },
+        { room: "A", color: "赤", colorDone: true },
+        { room: "A", notes: "意識あり・搬送要請" },
+        { room: "B", stove: "無し", stoveDone: true },
+        { room: "B", qr: "両足負傷", injuryDone: true },
+        { room: "B", color: "青", colorDone: true },
+        { room: "B", notes: "呼びかけ反応弱い" },
+        { room: "C", stove: "不明", stoveDone: true },
+        { room: "C", qr: "左腕負傷", injuryDone: true },
+        { room: "C", color: "黄", colorDone: true },
+        { room: "C", notes: "歩行可・軽傷" },
+      ];
+      let demoTimers = [];
+      let demoRunning = false;
+
+      function stopDemo() {
+        demoTimers.forEach(function (t) { clearTimeout(t); });
+        demoTimers = [];
+        demoRunning = false;
+        demoToggle.textContent = "デモ開始";
+        demoToggle.classList.remove("is-active");
+      }
+
+      function startDemo() {
+        demoRunning = true;
+        demoToggle.textContent = "デモ停止";
+        demoToggle.classList.add("is-active");
+        // まず3ルームの解析をクリアしてから順に入力していく
+        ["A", "B", "C"].forEach(function (r) {
+          client.send({
+            type: "set_room_analysis", room: r,
+            stove: "", stoveDone: false, qr: "", injuryDone: false,
+            color: "", colorDone: false, notes: "",
+          });
+        });
+        DEMO_STEPS.forEach(function (step, i) {
+          const t = setTimeout(function () {
+            const msg = { type: "set_room_analysis" };
+            Object.keys(step).forEach(function (k) { msg[k] = step[k]; });
+            client.send(msg);
+            log("デモ: ルーム" + step.room + " 入力");
+            if (i === DEMO_STEPS.length - 1) stopDemo();
+          }, 1200 * (i + 1));
+          demoTimers.push(t);
+        });
+      }
+
+      demoToggle.addEventListener("click", function () {
+        if (demoRunning) {
+          stopDemo();
+          log("デモ停止");
+        } else {
+          startDemo();
+          log("デモ開始");
+        }
       });
 
       document.querySelectorAll("[data-preset]").forEach(function (btn) {

@@ -56,6 +56,7 @@ def _default_room_analysis() -> dict[str, dict[str, Any]]:
         r: {
             "stove": "",
             "stoveDone": False,
+            "qr": "",
             "injuryDone": False,
             "color": "",
             "colorDone": False,
@@ -435,7 +436,7 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
         async with state.lock:
             ra = state.room_analysis.get(room)
             if ra is not None:
-                for key in ("stove", "color", "notes"):
+                for key in ("stove", "color", "notes", "qr"):
                     if key in msg:
                         ra[key] = str(msg[key])
                 for key in ("stoveDone", "injuryDone", "colorDone"):
