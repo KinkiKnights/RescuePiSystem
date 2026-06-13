@@ -1,29 +1,38 @@
 # webrtc-camera — Raspberry Pi カメラの低遅延WebRTC配信
 
-Raspberry Pi (Ubuntu 24.04, Pi 4/5想定) に接続したカメラ映像を、
+複数のRaspberry Pi (Ubuntu 24.04, Pi 4/5想定) に接続したカメラ映像を、
 **高性能な中継サーバー(SFU)経由でブラウザへWebRTC配信**するシステム。
 低遅延・低CPU負荷を重視し、可能な範囲でハードウェアアクセラレーションを活用する。
 
 > 前提: ローカルネットワーク内・管理された端末での利用。NAT越え/TURN/WebRTC不可時の
 > フォールバックは想定しない（STUN/TURN不要）。
 
+## 主な機能
+
+- **複数ラズパイの多重化**: 各PiはIDを申告して接続。ビュアーはIDを指定して見たいPiを選択。
+- **カメラ切替 (camChange)**: ビュアーからPiのカメラ番号を切替（無停止・再ネゴ不要）。
+  - 番号 **0 = スクリーン**、**1 = カメラ(初期値)**、**2.. = 追加カメラ**
+- **クライアントライブラリ**: `connect(videoEl, id)` で接続、`camChange(n)` で切替。
+- **ハードウェアアクセラレーション**: Pi4はHW H.264エンコード、Pi5はSW(低遅延)。
+
 ## アーキテクチャ
 
 ```
-┌──────────────────┐  WebRTC(H.264)   ┌────────────────────┐  WebRTC(H.264)  ┌──────────┐
-│ Raspberry Pi      │ ───publish────▶ │  中継サーバー (SFU)  │ ───fan-out────▶ │ ブラウザ  │
-│ camera → H.264    │                 │  Go + Pion          │                 │ (複数可)  │
-│ GStreamer/webrtcbin│                │  署名/中継/Web配信   │                 │          │
-└──────────────────┘                 └────────────────────┘                 └──────────┘
+ 複数のRaspberry Pi                高性能な中継サーバー (SFU)            複数ブラウザ
+┌──────────────────┐  WebRTC      ┌──────────────────────────┐ WebRTC  ┌──────────┐
+│ PI01: cam/screen  │ ──publish──▶ │ ID毎にストリーム管理        │ ──────▶ │ ?id=PI01 │
+│ (input-selector)  │             │ ・RTPファンアウト(再エンコ無) │        └──────────┘
+├──────────────────┤             │ ・WebSocketシグナリング      │ ──────▶ ┌──────────┐
+│ PI02: cam/screen  │ ──publish──▶ │ ・camChangeを該当Piへ転送    │         │ ?id=PI02 │
+└──────────────────┘             │ ・Web静的配信               │         └──────────┘
+                                  └──────────────────────────┘
+   camChange(n) ◀───── 制御メッセージを逆流して該当Piへ転送 ◀─────── ビュアー操作
 ```
 
-- **2レグともWebRTC。** Piは上り1本を送るだけで、視聴者が増えてもPiの負荷は一定。
-  ファンアウトは中継サーバーが担当する。
-- **SFU方式**: 中継サーバーは再エンコードせずRTPを転送するだけ（=低遅延・低CPU）。
-- **コーデックはH.264に統一**: Pi4のHWエンコーダがH.264、全ブラウザがH.264対応、
-  低遅延設定(constrained-baseline / zerolatency / Bフレーム無し)が容易。
-- **シグナリング**: WebSocket(JSON)。publisherはofferer、viewerはanswerer
-  （サーバーがトラックを乗せてオファーを作る）。LAN内なのでICEサーバ不要。
+- **2レグともWebRTC。** Piは上り1本だけ送信。視聴者が増えてもPi負荷は一定（ファンアウトはSFU）。
+- **SFU方式**: 中継サーバーは再エンコードせずRTPを転送（=低遅延・低CPU）。LANで概ね <100ms。
+- **コーデックはH.264統一**: Pi4のHWエンコーダ・全ブラウザが対応、低遅延設定が容易。
+- **シグナリング**: WebSocket(JSON)。publisherはofferer、viewerはanswerer。LAN内なのでICEサーバ不要。
 
 ## ハードウェアアクセラレーション方針（重要）
 
@@ -34,23 +43,47 @@ Raspberry Pi (Ubuntu 24.04, Pi 4/5想定) に接続したカメラ映像を、
 
 USBカメラ自体がH.264出力できる場合は、それを無加工で流せば最小負荷。
 
+## カメラ切替の仕組み
+
+Pi側は全入力ソースを **GStreamerの `input-selector`** に束ね、共通解像度に正規化してから
+1つのエンコーダ→webrtcbinへ流す。camChangeは `active-pad` を切替えるだけなので、
+**WebRTCの再ネゴシエーション不要・トラックは安定したまま**で、ビュアーも再接続不要。
+切替直後はSFUがPLIを送り、webrtcbin→エンコーダにキーフレームを促す。
+
 ## ディレクトリ構成
 
 ```
 webrtc-camera/
 ├── relay/                 # 中継サーバー (Go + Pion SFU)
-│   ├── main.go            #   WebSocketシグナリング + SFUファンアウト + Web静的配信
-│   └── relay              #   ビルド済みバイナリ
+│   └── main.go            #   ID多重化 / ファンアウト / camChange転送 / シグナリング / Web配信
 ├── web/
-│   └── index.html         # ブラウザ視聴クライアント (素のWebRTC, ビルド不要)
+│   ├── webrtc-camera.js   # 視聴クライアント・ライブラリ (connect / camChange)
+│   └── index.html         # ライブラリを使うサンプルUI (ID入力・カメラ切替ボタン)
 ├── publisher/             # Piパブリッシャ (GStreamer webrtcbin)
-│   ├── publish.py         #   本体 (シグナリング + パイプライン)
+│   ├── publish.py         #   ID申告 / input-selector複数ソース / camChange
 │   ├── publish-pi4.sh     #   Pi4用: HWエンコード(v4l2h264enc)
 │   ├── publish-pi5.sh     #   Pi5用: SWエンコード(x264enc)
 │   └── publish-test.sh    #   このPCでの動作確認用 (Webカメラ/videotestsrc)
 ├── tools/
 │   └── headless-viewer/   # ブラウザ無しで配信経路を検証するテスト用視聴クライアント
 └── README.md
+```
+
+## クライアントライブラリ API (`web/webrtc-camera.js`)
+
+```js
+const cam = new WebRTCCamera({
+  // server: "ws://host:8080/ws",   // 省略時は現在のホストから自動推定
+  onStatus: (s)  => {},              // "connecting"|"connected"|"closed"|"error:<msg>"
+  onStats:  (st) => {},              // {width,height,kbps,fps,jitterMs} 1秒ごと
+});
+
+cam.connect(videoElement, "PI01");   // ビデオ要素とPiのID(4文字程度)を渡すと自動接続
+cam.camChange(0);                    // 0=スクリーン
+cam.camChange(1);                    // 1=カメラ(初期値)
+cam.camChange(2);                    // 2=追加カメラ
+const ids = await cam.listPis();     // 接続中のPi ID一覧
+cam.disconnect();
 ```
 
 ## 必要パッケージ
@@ -65,8 +98,8 @@ sudo apt install golang-go
 sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-nice \
   gstreamer1.0-plugins-good gstreamer1.0-plugins-base gstreamer1.0-libav \
   python3-gi gir1.2-gst-plugins-bad-1.0 python3-websockets
-# Pi4のHWエンコードには v4l2h264enc (gstreamer1.0-plugins-good / カーネルV4L2) が必要
-# CSIカメラには libcamera / gstreamer1.0-libcamera
+# Pi4のHWエンコードには v4l2h264enc (gstreamer1.0-plugins-good / カーネルV4L2)
+# CSIカメラには gstreamer1.0-libcamera
 ```
 
 ## 使い方
@@ -74,63 +107,71 @@ sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-nice \
 ### 1. 中継サーバーを起動（高性能なマシンで）
 
 ```bash
-cd relay
-go build -o relay .          # 初回のみ
+cd relay && go build -o relay .       # 初回のみ
 ./relay -addr :8080 -web ../web
 ```
 
-### 2. ブラウザで視聴
-
-中継サーバーの `http://<サーバーIP>:8080/` を開く（自動接続）。
-
-### 3. Raspberry Piでパブリッシャを起動
+### 2. Raspberry Piでパブリッシャを起動（各Piで、IDを変える）
 
 ```bash
-# Pi4 (HWエンコード)
-SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi4.sh
-
-# Pi5 (SWエンコード)
-SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
+# Pi4 (HWエンコード)、ID=PI01
+PI_ID=PI01 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi4.sh
+# Pi5 (SWエンコード)、ID=PI02
+PI_ID=PI02 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
 ```
 
-カメラやパラメータは環境変数で上書きできる（各スクリプト冒頭のコメント参照）:
-- `SOURCE`  … カメラ入力部（`libcamerasrc` / `v4l2src device=/dev/video0` 等）
-- `ENCODER` … エンコード部（ビットレート/キーフレーム間隔の調整）
-- `SERVER`  … 中継サーバーのWS URL
+カメラ/パラメータは環境変数で上書き（各スクリプト冒頭のコメント参照）:
+- `PI_ID`   … このPiのID（ビュアーが指定する4文字程度の名前）
+- `CAM0`    … スクリーン入力（X11は`ximagesrc`、Waylandは`pipewiresrc`等）
+- `CAM1..`  … カメラ入力（`libcamerasrc` / `v4l2src device=/dev/videoN`。複数台はCAM2,CAM3...）
+- `DEFAULT_CAM` … 起動時の選択番号（既定 1）
+- `ENCODER` / `WIDTH` / `HEIGHT` / `FPS` / `SERVER`
+
+### 3. ブラウザで視聴
+
+`http://<サーバーIP>:8080/` を開き、IDを入力して「接続」。
+`http://<サーバーIP>:8080/?id=PI02` のようにURLでID指定も可。
+ヘッダーのカメラ番号ボタン(0/1/2)で切替。
 
 ## このPC(Ubuntu 24.04)での動作確認
 
-ラズパイ実機が無いため、このPCのWebカメラを「Piのカメラ役」として全経路を検証する。
+ラズパイ実機が無いため、このPCのWebカメラ/合成映像を「Pi役」として全経路を検証する。
 
 ```bash
-# 1) 中継サーバー
+# 中継サーバー
 ./relay/relay -addr :8080 -web web &
 
-# 2) パブリッシャ (実Webカメラ + x264enc。USE_TEST=1 で合成映像)
-SERVER=ws://127.0.0.1:8080/ws ./publisher/publish-test.sh &
+# Pi役1 (PI01): 0=カラーバー(画面代用), 1=実Webカメラ, 2=ボール
+PI_ID=PI01 ./publisher/publish-test.sh &
 
-# 3a) ブラウザで http://localhost:8080/ を開く
-# 3b) または、ヘッドレス視聴クライアントで経路を機械的に検証
+# Pi役2 (PI02): 合成映像のみ (Webカメラは1台しか開けないため)
+PI_ID=PI02 CAM0="videotestsrc pattern=gradient" \
+  CAM1="videotestsrc pattern=snow" CAM2="videotestsrc pattern=circular" \
+  ./publisher/publish-test.sh &
+
+# ブラウザで http://localhost:8080/ (ID=PI01) / ?id=PI02 を開く
+# またはヘッドレス視聴クライアントで機械的に検証:
 go build -o tools/headless-viewer/headless-viewer ./tools/headless-viewer
-tools/headless-viewer/headless-viewer -dur 6s -out /tmp/received.h264
-ffmpeg -i /tmp/received.h264 -frames:v 1 /tmp/frame.png   # → 実映像が取れる
+tools/headless-viewer/headless-viewer -id PI01 -dur 6s -cam 0 -camAt 1s -out /tmp/x.h264
+ffmpeg -i /tmp/x.h264 -update 1 /tmp/last.png   # 切替後(画面=カラーバー)が映る
 ```
 
 ### 検証結果（このPCで実施済み）
 
-- 実Webカメラ → GStreamer(x264) → webrtcbin → relay(Pion SFU) → 視聴 の
-  フルチェーンが疎通。受信ストリームは **1280x720 / H.264 Constrained Baseline /
-  約2.5Mbps** で、デコードして実フレーム取得を確認。
-- **複数視聴者へのファンアウトを確認**: 2クライアント同時接続で双方が同一ストリームを
-  受信。publisherの上りは1本のまま（=視聴者が増えてもPi負荷は一定）。
-- ヘッドレス視聴クライアントはブラウザと同一のシグナリング/SDP/ICE/RTP経路
-  （サーバーがオファー、クライアントがアンサー、H.264ネゴシエーション）を通るため、
+- 実Webカメラ → GStreamer(x264/input-selector) → webrtcbin → relay(Pion SFU) → 視聴 が疎通。
+  受信は **1280x720 / H.264 Constrained Baseline / 約2.5Mbps** でデコード可能。
+- **複数ラズパイのID指定ルーティング**: PI01/PI02を同時接続し、`?id=`で別々の映像を取得。
+  `GET /pis` で `["PI01","PI02"]` を確認。
+- **camChange**: ビュアーから PI01 を `0`(カラーバー=画面) / `1`(Webカメラ) / `2`(ボール) へ
+  無停止で切替えられることを、各切替後のデコードフレームで確認。
+- **ファンアウト**: 複数ビュアー同時接続で各自が同一ストリームを受信（Pi上りは1本のまま）。
+- ヘッドレス視聴はブラウザと同一の署名/SDP/ICE/RTP/camChange経路を通るため、
   ブラウザ視聴経路の検証を兼ねる。
 
 ## 低遅延のための設計
 
 - `tune=zerolatency` / `speed-preset=ultrafast` / `constrained-baseline` / Bフレーム無し
-- `rtph264pay aggregate-mode=zero-latency` で送出を遅延させない
-- SFUは再エンコードせず転送のみ → LANで概ね **<100ms**
-- 新規視聴者の接続時とその後の定期PLIで、キーフレームを確実に届ける
+- `rtph264pay aggregate-mode=zero-latency`、`queue ... leaky=downstream` で滞留を抑制
+- SFUは再エンコードせず転送のみ → LANで概ね <100ms
+- 新規視聴・camChange時にPLIでキーフレームを即時取得
 - ビットレート/解像度/フレームレートは各スクリプトのENV/ENCODERで調整可能

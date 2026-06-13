@@ -23,8 +23,10 @@ import (
 type sigMsg struct {
 	Type      string                     `json:"type"`
 	Role      string                     `json:"role,omitempty"`
+	ID        string                     `json:"id,omitempty"`
 	SDP       *webrtc.SessionDescription `json:"sdp,omitempty"`
 	Candidate *webrtc.ICECandidateInit   `json:"candidate,omitempty"`
+	Cam       *int                       `json:"cam,omitempty"`
 	Message   string                     `json:"message,omitempty"`
 }
 
@@ -32,6 +34,9 @@ func main() {
 	server := flag.String("server", "ws://127.0.0.1:8080/ws", "relay WS URL")
 	out := flag.String("out", "/tmp/received.h264", "保存先H.264ファイル")
 	dur := flag.Duration("dur", 5*time.Second, "受信時間")
+	id := flag.String("id", "PI01", "視聴対象のPi ID")
+	cam := flag.Int("cam", -1, "接続後に切替えるカメラ番号(>=0で有効)")
+	camAt := flag.Duration("camAt", 2*time.Second, "camChangeを送るまでの待ち時間")
 	flag.Parse()
 
 	u, err := url.Parse(*server)
@@ -137,7 +142,17 @@ func main() {
 		}
 	}()
 
-	send(sigMsg{Type: "hello", Role: "viewer"})
+	send(sigMsg{Type: "hello", Role: "viewer", ID: *id})
+
+	// 指定があれば一定時間後にカメラ切替を送る (camChangeテスト用)
+	if *cam >= 0 {
+		go func() {
+			time.Sleep(*camAt)
+			c := *cam
+			log.Printf("sending camChange -> %d", c)
+			send(sigMsg{Type: "camChange", Cam: &c})
+		}()
+	}
 
 	select {
 	case <-time.After(*dur):

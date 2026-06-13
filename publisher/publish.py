@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 """
-WebRTCカメラパブリッシャ (Raspberry Pi 用 / GStreamer webrtcbin)
+WebRTCカメラパブリッシャ (Raspberry Pi 用 / GStreamer webrtcbin) — 複数カメラ + 切替対応
 
-カメラ映像をH.264でエンコードし、relayサーバーへWebRTCで送信する。
+カメラ/スクリーン映像をH.264でエンコードし、relayサーバーへWebRTCで送信する。
 パブリッシャは offerer (webrtcbinがオファーを生成)。
 
-パイプラインは環境変数で差し替える:
-  SOURCE  : カメラ入力部 (例: libcamerasrc / v4l2src device=/dev/video0 / videotestsrc)
-  ENCODER : エンコード部 (例: v4l2h264enc[Pi4 HW] / x264enc[SW] )
-  SERVER  : relayサーバーのWS URL (例: ws://192.168.1.10:8080/ws)
+特徴:
+  - 接続時に自分のID(PI_ID, 4文字程度)をrelayへ申告。ビュアーはこのIDで視聴対象を選ぶ。
+  - 複数の入力ソースを input-selector に束ね、camChangeで無停止に切替える(再ネゴ不要)。
+  - カメラ番号: 0 = スクリーン, 1 = カメラ(初期値), 2.. = 追加カメラ。
+  - 全ソースを共通解像度にスケールするので、エンコーダ/トラックは安定したまま。
 
-通常はラッパースクリプト(publish-pi4.sh等)経由で起動する。
+環境変数:
+  PI_ID       : このPiのID (既定 "PI01")
+  SERVER      : relayのWS URL (既定 ws://127.0.0.1:8080/ws)
+  WIDTH/HEIGHT/FPS : 共通出力解像度 (既定 1280/720/30)
+  ENCODER     : エンコード部 (既定 x264enc ... / Pi4は v4l2h264enc)
+  DEFAULT_CAM : 起動時の選択番号 (既定 1)
+  CAM0..CAM9  : 各番号の入力ソース部。CAM0はスクリーン、CAM1以降はカメラ。
+                (定義された番号だけが選択肢になる)
+
+通常はラッパースクリプト(publish-pi4.sh 等)経由で起動する。
 """
 import os
 import sys
@@ -22,51 +32,87 @@ import gi
 gi.require_version("Gst", "1.0")
 gi.require_version("GstWebRTC", "1.0")
 gi.require_version("GstSdp", "1.0")
-from gi.repository import Gst, GstWebRTC, GstSdp, GLib
+from gi.repository import Gst, GstWebRTC, GstSdp, GLib  # noqa: E402
 
-import websockets
+import websockets  # noqa: E402
 
 Gst.init(None)
 
+PI_ID = os.environ.get("PI_ID", "PI01")
 SERVER = os.environ.get("SERVER", "ws://127.0.0.1:8080/ws")
+WIDTH = os.environ.get("WIDTH", "1280")
+HEIGHT = os.environ.get("HEIGHT", "720")
+FPS = os.environ.get("FPS", "30")
+DEFAULT_CAM = int(os.environ.get("DEFAULT_CAM", "1"))
 
-# --- カメラ入力 (機種/カメラに応じて差し替え) ---
-SOURCE = os.environ.get(
-    "SOURCE",
-    "videotestsrc is-live=true pattern=ball ! video/x-raw,width=1280,height=720,framerate=30/1",
-)
-
-# --- エンコード (機種に応じて差し替え) ---
-#   Pi4: v4l2h264enc (ハードウェアエンコード)
-#   Pi5/PC: x264enc (ソフトウェア, zerolatency)
+# エンコード部 (機種に応じて差し替え)
+#   Pi4: v4l2h264enc (HW)  /  Pi5・PC: x264enc (SW, zerolatency)
 ENCODER = os.environ.get(
     "ENCODER",
     "x264enc tune=zerolatency speed-preset=ultrafast bitrate=2500 key-int-max=30",
 )
 
-# webrtcbinへ渡すRTPペイロード。H.264, packetization-mode=1。
-PIPELINE_DESC = (
-    f"{SOURCE} ! videoconvert ! {ENCODER} ! "
-    "video/x-h264,profile=constrained-baseline ! "
-    "h264parse config-interval=-1 ! "
-    "rtph264pay config-interval=-1 aggregate-mode=zero-latency pt=96 ! "
-    "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
-    "webrtcbin name=sendrecv bundle-policy=max-bundle latency=0"
-)
+# 入力ソースの収集。CAM0..CAM9 のうち定義されたものだけ採用する。
+#   0 = スクリーン (既定 ximagesrc。WaylandならCAM0をpipewiresrc等に上書き)
+#   1 = カメラ (既定 /dev/video0)
+DEFAULT_SOURCES = {
+    0: "ximagesrc use-damage=false",
+    1: "v4l2src device=/dev/video0",
+}
+
+
+def collect_sources():
+    sources = {}
+    for n in range(10):
+        v = os.environ.get(f"CAM{n}")
+        if v:
+            sources[n] = v
+    if not sources:
+        sources = dict(DEFAULT_SOURCES)
+    return sources
+
+
+SOURCES = collect_sources()
+
+# 共通の生映像caps。全ソースをこれに揃える(=エンコーダ入力が常に一定)。
+COMMON = f"video/x-raw,width={WIDTH},height={HEIGHT},framerate={FPS}/1"
+
+
+def build_pipeline_desc():
+    # input-selector -> 共通エンコード -> webrtcbin
+    parts = [
+        f"input-selector name=sel ! videoconvert ! {ENCODER} ! "
+        "video/x-h264,profile=constrained-baseline ! "
+        "h264parse config-interval=-1 ! "
+        "rtph264pay config-interval=-1 aggregate-mode=zero-latency pt=96 ! "
+        "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
+        "webrtcbin name=sendrecv bundle-policy=max-bundle latency=0"
+    ]
+    # 各ソースを共通解像度に正規化して selector.sink_<番号> へ
+    for num, src in sorted(SOURCES.items()):
+        parts.append(
+            f"{src} ! queue max-size-buffers=2 leaky=downstream ! "
+            f"videoconvert ! videoscale ! {COMMON} ! sel.sink_{num}"
+        )
+    return "  ".join(parts)
 
 
 class Publisher:
     def __init__(self, loop):
-        self.loop = loop          # asyncioイベントループ (WS送信に使用)
+        self.loop = loop
         self.ws = None
         self.pipe = None
         self.webrtc = None
+        self.selector = None
+        self.current_cam = None
 
-    # ---- GStreamer 側 ----
+    # ---- GStreamer ----
     def start_pipeline(self):
-        print("[pipeline]", PIPELINE_DESC, flush=True)
-        self.pipe = Gst.parse_launch(PIPELINE_DESC)
+        desc = build_pipeline_desc()
+        print("[pipeline]", desc, flush=True)
+        self.pipe = Gst.parse_launch(desc)
         self.webrtc = self.pipe.get_by_name("sendrecv")
+        self.selector = self.pipe.get_by_name("sel")
         self.webrtc.connect("on-negotiation-needed", self.on_negotiation_needed)
         self.webrtc.connect("on-ice-candidate", self.on_ice_candidate)
 
@@ -75,6 +121,22 @@ class Publisher:
         bus.connect("message", self.on_bus_message)
 
         self.pipe.set_state(Gst.State.PLAYING)
+        # 初期カメラを選択 (既定1)
+        cam0 = DEFAULT_CAM if DEFAULT_CAM in SOURCES else min(SOURCES)
+        self.set_cam(cam0)
+
+    def set_cam(self, num):
+        if num not in SOURCES:
+            print(f"[cam] number {num} not configured (have {sorted(SOURCES)})", flush=True)
+            return
+        pad = self.selector.get_static_pad(f"sink_{num}")
+        if not pad:
+            print(f"[cam] no pad sink_{num}", flush=True)
+            return
+        self.selector.set_property("active-pad", pad)
+        self.current_cam = num
+        kind = "screen" if num == 0 else "camera"
+        print(f"[cam] switched to {num} ({kind})", flush=True)
 
     def on_bus_message(self, _bus, message):
         t = message.type
@@ -105,9 +167,9 @@ class Publisher:
             "candidate": {"candidate": candidate, "sdpMLineIndex": mlineindex},
         })
 
-    # ---- シグナリング受信処理 (GLibスレッドへ橋渡し) ----
+    # ---- シグナリング受信 ----
     def handle_answer(self, sdp_text):
-        res, sdpmsg = GstSdp.SDPMessage.new_from_text(sdp_text)
+        _res, sdpmsg = GstSdp.SDPMessage.new_from_text(sdp_text)
         answer = GstWebRTC.WebRTCSessionDescription.new(
             GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg
         )
@@ -117,10 +179,13 @@ class Publisher:
     def handle_remote_candidate(self, mlineindex, candidate):
         self.webrtc.emit("add-ice-candidate", mlineindex, candidate)
 
-    # ---- WS送信 (GLibスレッドからasyncioへ) ----
+    def handle_cam_change(self, num):
+        # GLibスレッドで実行 (パイプライン操作)
+        GLib.idle_add(lambda: (self.set_cam(num), False)[1])
+
+    # ---- WS送信 ----
     def send_async(self, obj):
-        data = json.dumps(obj)
-        asyncio.run_coroutine_threadsafe(self._send(data), self.loop)
+        asyncio.run_coroutine_threadsafe(self._send(json.dumps(obj)), self.loop)
 
     async def _send(self, data):
         if self.ws:
@@ -131,15 +196,13 @@ async def run():
     loop = asyncio.get_running_loop()
     pub = Publisher(loop)
 
-    # GStreamerはGLibメインループを別スレッドで回す
     glib_loop = GLib.MainLoop()
     threading.Thread(target=glib_loop.run, daemon=True).start()
 
-    print(f"[ws] connecting to {SERVER}", flush=True)
+    print(f"[ws] connecting to {SERVER} as id={PI_ID} (cams={sorted(SOURCES)})", flush=True)
     async with websockets.connect(SERVER) as ws:
         pub.ws = ws
-        await ws.send(json.dumps({"type": "hello", "role": "publisher"}))
-        # helloを送ってからパイプラインを起動 (on-negotiation-neededでオファー生成)
+        await ws.send(json.dumps({"type": "hello", "role": "publisher", "id": PI_ID}))
         pub.start_pipeline()
 
         async for raw in ws:
@@ -149,9 +212,9 @@ async def run():
                 pub.handle_answer(msg["sdp"]["sdp"])
             elif mtype == "candidate":
                 c = msg["candidate"]
-                pub.handle_remote_candidate(
-                    c.get("sdpMLineIndex", 0), c["candidate"]
-                )
+                pub.handle_remote_candidate(c.get("sdpMLineIndex", 0), c["candidate"])
+            elif mtype == "camChange":
+                pub.handle_cam_change(int(msg["cam"]))
             elif mtype == "error":
                 print("[signal ERROR]", msg.get("message"), file=sys.stderr, flush=True)
 
