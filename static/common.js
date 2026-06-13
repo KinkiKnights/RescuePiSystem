@@ -194,17 +194,8 @@
   // getVideo() で対象 <video> を返すと、一定間隔で QR を読取り onDetect(text) を呼ぶ。
   // BarcodeDetector 非対応ブラウザでは何もしない（supported:false）。
   function createQrScanner(getVideo, onDetect, intervalMs) {
-    // 1) ブラウザ標準 BarcodeDetector（あれば最優先）
-    let detector = null;
-    if ("BarcodeDetector" in global) {
-      try {
-        detector = new global.BarcodeDetector({ formats: ["qr_code"] });
-      } catch (e) {
-        detector = null;
-      }
-    }
-    // 2) フォールバック: jsQR（static/jsqr.js）
-    const useJsqr = !detector && typeof global.jsQR === "function";
+    // QR デコードは jsQR（static/jsqr.js）で行う。
+    const useJsqr = typeof global.jsQR === "function";
     let canvas = null, ctx = null;
 
     function scanWithJsqr(video) {
@@ -228,28 +219,16 @@
       if (code && code.data) onDetect(code.data);
     }
 
-    let busy = false;
     const timer = setInterval(function () {
+      if (!useJsqr) return;
       const video = getVideo();
       if (!video || video.readyState < 2 || !video.videoWidth) return;
-      if (detector) {
-        if (busy) return;
-        busy = true;
-        detector
-          .detect(video)
-          .then(function (codes) {
-            if (codes && codes.length && codes[0].rawValue) onDetect(codes[0].rawValue);
-          })
-          .catch(function () {})
-          .then(function () { busy = false; });
-      } else if (useJsqr) {
-        scanWithJsqr(video);
-      }
+      scanWithJsqr(video);
     }, intervalMs || 700);
 
     return {
-      supported: !!detector || useJsqr,
-      method: detector ? "BarcodeDetector" : useJsqr ? "jsQR" : "none",
+      supported: useJsqr,
+      method: useJsqr ? "jsQR" : "none",
       stop: function () { clearInterval(timer); },
     };
   }
