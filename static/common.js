@@ -66,6 +66,7 @@
       );
     }
 
+    // src は initVideos / attachVideo がモード(file/webrtc)に応じて後付けする
     return (
       '<div class="video-box' +
       cls +
@@ -75,9 +76,7 @@
       '<span class="video-box__label">' +
       escapeHtml(label) +
       "</span>" +
-      '<video src="' +
-      src +
-      '" loop muted autoplay playsinline></video>' +
+      '<video loop muted autoplay playsinline></video>' +
       '<span class="video-box__placeholder" hidden>映像<br>No Connect</span>' +
       "</div>"
     );
@@ -98,25 +97,95 @@
     );
   }
 
-  function initVideos(root) {
-    const scope = root || document;
-    scope.querySelectorAll(".video-box video").forEach(function (video) {
+  // WebRTC中継サーバーの ws URL を解決する。
+  //  空        → ws://<現在のホスト>:8080/ws
+  //  ws(s)://… → そのまま
+  //  host[:port] → ws://host[:port|:8080]/ws
+  function resolveWebrtcServer(s) {
+    if (!s) return "ws://" + (location.hostname || "localhost") + ":8080/ws";
+    if (/^wss?:\/\//.test(s)) return s;
+    const hasPort = s.indexOf(":") >= 0;
+    return "ws://" + s + (hasPort ? "" : ":8080") + "/ws";
+  }
+
+  function _tryPlay(video) {
+    const p = video.play();
+    if (p && typeof p.catch === "function") p.catch(function () {});
+  }
+
+  // 1つの <video> に映像ソースを割り当てる。
+  //  mode="file"  : video/<号機>.mp4 をループ再生（従来動作）
+  //  mode="webrtc": WebRTCCamera で RES<号機> に接続（号機1〜5のみ。overview等は file にフォールバック）
+  function attachVideo(video, mode, server) {
+    const box = video.closest(".video-box");
+    const placeholder = box && box.querySelector(".video-box__placeholder");
+    const du = box ? box.getAttribute("data-unit") : null;
+    const isOverview = du === "overview";
+    const unitNum = isOverview ? null : Number(du);
+
+    // 既存のWebRTC接続を破棄
+    if (video._rtc) {
+      try { video._rtc.disconnect(); } catch (e) {}
+      video._rtc = null;
+    }
+
+    function showFile() {
+      const src = isOverview ? overviewVideoUrl() : unitVideoUrl(unitNum);
+      video.srcObject = null;
+      video.loop = true;
+      video.muted = true;
+      if (!src) {
+        video.hidden = true;
+        if (placeholder) placeholder.hidden = false;
+        return;
+      }
+      video.hidden = false;
+      if (placeholder) placeholder.hidden = true;
+      video.src = src;
       video.addEventListener(
         "error",
         function () {
           video.hidden = true;
-          const box = video.closest(".video-box");
-          const fallback = box && box.querySelector(".video-box__placeholder");
-          if (fallback) fallback.hidden = false;
+          if (placeholder) placeholder.hidden = false;
         },
         { once: true }
       );
-      const playPromise = video.play();
-      if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch(function () {
-          /* autoplay blocked */
-        });
-      }
+      // src を JS で後付けすると autoplay 属性が発火しないため、
+      // 再生可能になった時点で明示的に play() する。
+      video.addEventListener("canplay", function () { _tryPlay(video); }, { once: true });
+      _tryPlay(video);
+    }
+
+    if (mode === "webrtc" && unitNum >= 1 && unitNum <= 5 && global.WebRTCCamera) {
+      video.loop = false;
+      video.removeAttribute("src");
+      video.hidden = false;
+      if (placeholder) placeholder.hidden = false; // 接続するまでは「No Connect」表示
+      const cam = new global.WebRTCCamera({
+        server: resolveWebrtcServer(server),
+        onStatus: function (s) {
+          if (s === "connected") {
+            if (placeholder) placeholder.hidden = true;
+          } else if (s === "closed" || s.indexOf("error") === 0) {
+            if (placeholder) placeholder.hidden = false;
+          }
+        },
+      });
+      video._rtc = cam;
+      cam.connect(video, "RES" + unitNum);
+      _tryPlay(video);
+    } else {
+      showFile();
+    }
+  }
+
+  // root 配下の全 .video-box video にソースを割り当てる。
+  // mode 省略時は "file"（従来呼び出しと互換）。
+  function initVideos(root, mode, server) {
+    const scope = root || document;
+    const m = mode || "file";
+    scope.querySelectorAll(".video-box video").forEach(function (video) {
+      attachVideo(video, m, server);
     });
   }
 
@@ -306,6 +375,8 @@
     videoPlaceholder: videoPlaceholder,
     videoGrid2x2: videoGrid2x2,
     initVideos: initVideos,
+    attachVideo: attachVideo,
+    resolveWebrtcServer: resolveWebrtcServer,
     createWsClient: createWsClient,
     setConnBadge: setConnBadge,
     renderTasks: renderTasks,

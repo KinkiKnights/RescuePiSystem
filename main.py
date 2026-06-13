@@ -96,6 +96,10 @@ class AppState:
         self.units: dict[int, dict[str, Any]] = _default_units()
         self.room_units: dict[str, int] = {"A": 4, "B": 3, "C": 5}
         self.room_analysis: dict[str, dict[str, Any]] = _default_room_analysis()
+        # 映像ソース: "file"(動画ファイル) または "webrtc"(機体上カメラ中継)
+        self.video_mode: str = "file"
+        # WebRTC中継サーバー(空ならクライアントが ws://<host>:8080/ws を自動推定)
+        self.webrtc_server: str = ""
         self.analysis: dict[str, str] = deepcopy(DEFAULT_ANALYSIS)
         self.master_overlay: dict[str, Any] = {
             "visible": False,
@@ -124,6 +128,8 @@ class AppState:
             "units": deepcopy(self.units),
             "room_units": dict(self.room_units),
             "room_analysis": deepcopy(self.room_analysis),
+            "video_mode": self.video_mode,
+            "webrtc_server": self.webrtc_server,
             "analysis": dict(self.analysis),
             "master_overlay": deepcopy(self.master_overlay),
             "analysis_request": dict(self.analysis_request),
@@ -155,6 +161,8 @@ class AppState:
         self.units = _default_units()
         self.room_units = {"A": 4, "B": 3, "C": 5}
         self.room_analysis = _default_room_analysis()
+        self.video_mode = "file"
+        self.webrtc_server = ""
         self.analysis = deepcopy(DEFAULT_ANALYSIS)
         self.master_overlay = {"visible": False, "title": "", "lines": []}
         self.analysis_request = {"pending": False, "unit": 0, "timestamp": 0}
@@ -279,6 +287,12 @@ async def post_master(body: dict[str, Any]) -> dict[str, str]:
             unit = int(body.get("unit", 1))
             if 1 <= unit <= 5:
                 state.analytics_target_unit = unit
+        elif action == "set_video_mode":
+            mode = str(body.get("mode", "file"))
+            if mode in ("file", "webrtc"):
+                state.video_mode = mode
+        elif action == "set_webrtc_server":
+            state.webrtc_server = str(body.get("server", "")).strip()
         elif action == "complete_task":
             task_id = int(body.get("task_id", 0))
             for t in state.tasks:

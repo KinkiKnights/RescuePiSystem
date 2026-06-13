@@ -207,6 +207,7 @@
     </main>
   </div>
 
+  <script src="/static/webrtc-camera.js"></script>
   <script src="/static/common.js"></script>
   <script>
     (function () {
@@ -243,6 +244,8 @@
 
       let selectedUnit = 1;
       let ctrlHeld = false;
+      let videoMode = "file";
+      let webrtcServer = "";
 
       /* ---- 映像 3x2 ＋ 接続情報セルを一度だけ構築 ---- */
       videoGrid.innerHTML =
@@ -251,7 +254,7 @@
         '<div class="conn-cell__title">接続情報</div>' +
         '<div class="conn-tiles" id="connTiles"></div>' +
         "</div>";
-      RC.initVideos(videoGrid);
+      RC.initVideos(videoGrid, videoMode, webrtcServer);
       const connTilesEl = document.getElementById("connTiles");
 
       /* ---- 対象号機の選択（カメラ映像／接続タイルのクリック） ---- */
@@ -438,6 +441,14 @@
           renderConn(st);
           updateCameraDisabled(latestUnits);
           updateDisableButton();
+
+          const nextMode = st.video_mode || "file";
+          const nextServer = st.webrtc_server || "";
+          if (nextMode !== videoMode || nextServer !== webrtcServer) {
+            videoMode = nextMode;
+            webrtcServer = nextServer;
+            RC.initVideos(videoGrid, videoMode, webrtcServer);
+          }
         },
       });
 

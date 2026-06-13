@@ -439,6 +439,7 @@
       <span class="key-banner__item"><kbd>Enter</kbd>操縦要請の承諾</span>
     </footer>
   </div>
+  <script src="/static/webrtc-camera.js"></script>
   <script src="/static/common.js"></script>
   <script>
     (function () {
@@ -649,6 +650,8 @@
 
       let viewMode = "both"; // "a" = 操作機のみ / "b" = 天カメのみ / "both" = 2画面
       let videoUnitA = 1;
+      let videoMode = "file";
+      let webrtcServer = "";
 
       const OVERHEAD_UNIT = 1; // 天カメ = 1号機のカメラ
 
@@ -672,7 +675,7 @@
         videoUnitLabel.textContent = label;
         mainVideo.classList.toggle("is-dual", viewMode === "both");
         mainVideo.innerHTML = html;
-        RC.initVideos(mainVideo);
+        RC.initVideos(mainVideo, videoMode, webrtcServer);
         document.querySelectorAll("#keyBanner [data-mode]").forEach(function (el) {
           el.classList.toggle("is-active", el.dataset.mode === viewMode);
         });
@@ -700,10 +703,19 @@
           }
           renderTasks(st.tasks);
           renderUnitSelect(st);
+          let needVideo = false;
           if (st.control_operating_unit !== videoUnitA) {
             videoUnitA = st.control_operating_unit;
-            renderVideo();
+            needVideo = true;
           }
+          const nextMode = st.video_mode || "file";
+          const nextServer = st.webrtc_server || "";
+          if (nextMode !== videoMode || nextServer !== webrtcServer) {
+            videoMode = nextMode;
+            webrtcServer = nextServer;
+            needVideo = true;
+          }
+          if (needVideo) renderVideo();
           showNotification(st.notification);
 
           const req = st.control_request || {};

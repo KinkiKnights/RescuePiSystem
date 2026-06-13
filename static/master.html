@@ -43,6 +43,28 @@
       overflow-y: auto;
     }
     .log p { margin: 0 0 0.35rem; }
+    .btn.is-active {
+      background: #2f8f46;
+      border-color: #2f8f46;
+      color: #ffffff;
+    }
+    .relay-row { display: flex; gap: 6px; margin-top: 6px; }
+    .relay-row input {
+      flex: 1;
+      min-width: 0;
+      padding: 0.55rem;
+      font-family: inherit;
+      font-size: 0.82rem;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .relay-row .btn { width: auto; flex-shrink: 0; }
+    .video-mode-hint {
+      margin: 0.4rem 0 0;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -52,6 +74,18 @@
       <span class="conn-badge connecting" id="connBadge">接続中…</span>
     </header>
     <main class="master-main">
+      <section>
+        <h2 class="section-title">映像ソース（全画面）</h2>
+        <div class="btn-grid">
+          <button type="button" class="btn" data-video-mode="file">動画ファイル</button>
+          <button type="button" class="btn" data-video-mode="webrtc">WebRTC（実機カメラ）</button>
+        </div>
+        <div class="relay-row">
+          <input id="relayInput" type="text" placeholder="中継先（例: 192.168.1.50 / ws://host:8080/ws）空欄で自動" />
+          <button type="button" class="btn" id="relaySet">中継先を設定</button>
+        </div>
+        <p class="video-mode-hint" id="videoModeHint">現在: 動画ファイル（1〜5号機 → カメラID RES1〜RES5）</p>
+      </section>
       <section>
         <h2 class="section-title">アナリティクス — 解析データ投入</h2>
         <div class="btn-grid">
@@ -152,11 +186,26 @@
         logEl.insertBefore(p, logEl.firstChild);
       }
 
+      const relayInput = document.getElementById("relayInput");
+      const videoModeHint = document.getElementById("videoModeHint");
+
       const client = RC.createWsClient("master", {
         onStatus: function (s) {
           RC.setConnBadge(connBadge, s);
         },
-        onState: function () {},
+        onState: function (st) {
+          const mode = st.video_mode || "file";
+          const server = st.webrtc_server || "";
+          document.querySelectorAll("[data-video-mode]").forEach(function (b) {
+            b.classList.toggle("is-active", b.dataset.videoMode === mode);
+          });
+          videoModeHint.textContent =
+            "現在: " +
+            (mode === "webrtc" ? "WebRTC（実機カメラ）" : "動画ファイル") +
+            "（1〜5号機 → カメラID RES1〜RES5）" +
+            (server ? "　中継: " + server : "");
+          if (document.activeElement !== relayInput && server) relayInput.value = server;
+        },
       });
 
       function postMaster(body) {
@@ -168,6 +217,20 @@
           log(body.action || JSON.stringify(body));
         });
       }
+
+      document.querySelectorAll("[data-video-mode]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const mode = btn.dataset.videoMode;
+          postMaster({ action: "set_video_mode", mode: mode });
+          log("映像ソース → " + (mode === "webrtc" ? "WebRTC（実機カメラ）" : "動画ファイル"));
+        });
+      });
+
+      document.getElementById("relaySet").addEventListener("click", function () {
+        const v = relayInput.value.trim();
+        postMaster({ action: "set_webrtc_server", server: v });
+        log("WebRTC中継先 → " + (v || "(自動推定)"));
+      });
 
       document.querySelectorAll("[data-preset]").forEach(function (btn) {
         btn.addEventListener("click", function () {

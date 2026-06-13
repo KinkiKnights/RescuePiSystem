@@ -387,6 +387,7 @@
       <ul id="overlayLines"></ul>
     </div>
   </div>
+  <script src="/static/webrtc-camera.js"></script>
   <script src="/static/common.js"></script>
   <script>
     (function () {
@@ -410,16 +411,24 @@
       const showNotification = RC.createNotifier(notifyBar, notifyText);
       let currentTargetUnit = 0;
       let pendingRequestUnit = 0;
+      let videoMode = "file";
+      let webrtcServer = "";
 
       /* 天カメ（1号機）は一度だけ構築。複製せず同一要素を CSS で移動 */
       viewTen.innerHTML = RC.videoBox(1, "", { label: "天カメ（1号機）" });
-      RC.initVideos(viewTen);
+      RC.initVideos(viewTen, videoMode, webrtcServer);
 
       function renderTargetVideo(unit) {
         if (unit === currentTargetUnit) return;
         currentTargetUnit = unit;
         viewTarget.innerHTML = RC.videoBox(unit, "", { label: "対象機（" + unit + "号機）" });
-        RC.initVideos(viewTarget);
+        RC.initVideos(viewTarget, videoMode, webrtcServer);
+      }
+
+      // 映像モード/中継先が変わったら、天カメ・対象機の両方を貼り直す
+      function applyVideoMode() {
+        RC.initVideos(viewTen, videoMode, webrtcServer);
+        RC.initVideos(viewTarget, videoMode, webrtcServer);
       }
 
       /* ビュー選択：選ばれたものを中央へ（CSS grid-area で移動） */
@@ -585,6 +594,14 @@
         selectedUnit = unit;
         renderUnitBar(st.units || {});
         renderTargetVideo(unit);
+
+        const nextMode = st.video_mode || "file";
+        const nextServer = st.webrtc_server || "";
+        if (nextMode !== videoMode || nextServer !== webrtcServer) {
+          videoMode = nextMode;
+          webrtcServer = nextServer;
+          applyVideoMode();
+        }
 
         if (st.room_analysis) {
           roomAnalysis = st.room_analysis;
