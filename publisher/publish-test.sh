@@ -1,8 +1,8 @@
 #!/bin/bash
 # このPC(Ubuntu)での動作確認用パブリッシャ (ラズパイ役)
-#   - カメラ番号: 0=スクリーン代用(カラーバー), 1=実Webカメラ(初期値), 2=合成映像(ボール)
-#   - 実機のスクリーン取得は ximagesrc(X11)/pipewiresrc(Wayland)。ここでは検証容易な
-#     videotestsrc で代用する(CAM0を上書きすれば実スクリーンも可)。
+#   - カメラ番号: 1=実Webカメラ(初期値), 2=合成映像(ボール)
+#   - 画面取得(0)は既定で無効。検証で使うなら CAM0 を設定する
+#     (例: CAM0="videotestsrc pattern=smpte" / 実画面は ximagesrc・pipewiresrc)
 #
 # 使い方:
 #   PI_ID=PI01 ./publish-test.sh
@@ -14,8 +14,6 @@ export PI_ID="${PI_ID:-PI01}"
 export SERVER="${SERVER:-ws://127.0.0.1:8080/ws}"
 export DEFAULT_CAM="${DEFAULT_CAM:-1}"
 
-# 0 = スクリーン代用 (カラーバー)
-export CAM0="${CAM0:-videotestsrc is-live=true pattern=smpte}"
 # 1 = 実Webカメラ (MJPEG出力をデコード)
 export CAM1="${CAM1:-v4l2src device=/dev/video0 ! image/jpeg,framerate=30/1 ! jpegdec}"
 # 2 = 合成映像 (動くボール)

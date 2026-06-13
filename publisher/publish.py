@@ -8,7 +8,8 @@ WebRTCカメラパブリッシャ (Raspberry Pi 用 / GStreamer webrtcbin) — �
 特徴:
   - 接続時に自分のID(PI_ID, 4文字程度)をrelayへ申告。ビュアーはこのIDで視聴対象を選ぶ。
   - 複数の入力ソースを input-selector に束ね、camChangeで無停止に切替える(再ネゴ不要)。
-  - カメラ番号: 0 = スクリーン, 1 = カメラ(初期値), 2.. = 追加カメラ。
+  - カメラ番号: 1 = カメラ(初期値), 2.. = 追加カメラ。
+    画面取得(0)は既定で無効(待機ソースのCPU上積みを避けるため)。CAM0設定で有効化可。
   - 全ソースを共通解像度にスケールするので、エンコーダ/トラックは安定したまま。
 
 環境変数:
@@ -53,10 +54,10 @@ ENCODER = os.environ.get(
 )
 
 # 入力ソースの収集。CAM0..CAM9 のうち定義されたものだけ採用する。
-#   0 = スクリーン (既定 ximagesrc。WaylandならCAM0をpipewiresrc等に上書き)
+#   既定では画面取得(0)は無効。CAM0を設定すれば有効化される。
+#   0 = スクリーン (例: CAM0="ximagesrc use-damage=false" / Waylandは pipewiresrc)
 #   1 = カメラ (既定 /dev/video0)
 DEFAULT_SOURCES = {
-    0: "ximagesrc use-damage=false",
     1: "v4l2src device=/dev/video0",
 }
 

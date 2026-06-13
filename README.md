@@ -11,7 +11,8 @@
 
 - **複数ラズパイの多重化**: 各PiはIDを申告して接続。ビュアーはIDを指定して見たいPiを選択。
 - **カメラ切替 (camChange)**: ビュアーからPiのカメラ番号を切替（無停止・再ネゴ不要）。
-  - 番号 **0 = スクリーン**、**1 = カメラ(初期値)**、**2.. = 追加カメラ**
+  - 番号 **1 = カメラ(初期値)**、**2.. = 追加カメラ**
+  - 番号 **0 = スクリーン**（既定では無効。`CAM0`を設定すると有効化／待機ソースのCPUを避けるため）
 - **クライアントライブラリ**: `connect(videoEl, id)` で接続、`camChange(n)` で切替。
 - **ハードウェアアクセラレーション**: Pi4はHW H.264エンコード、Pi5はSW(低遅延)。
 
@@ -122,8 +123,8 @@ PI_ID=PI02 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
 
 カメラ/パラメータは環境変数で上書き（各スクリプト冒頭のコメント参照）:
 - `PI_ID`   … このPiのID（ビュアーが指定する4文字程度の名前）
-- `CAM0`    … スクリーン入力（X11は`ximagesrc`、Waylandは`pipewiresrc`等）
 - `CAM1..`  … カメラ入力（`libcamerasrc` / `v4l2src device=/dev/videoN`。複数台はCAM2,CAM3...）
+- `CAM0`    … スクリーン入力（既定で無効。設定時のみ有効：X11は`ximagesrc`、Waylandは`pipewiresrc`等）
 - `DEFAULT_CAM` … 起動時の選択番号（既定 1）
 - `ENCODER` / `WIDTH` / `HEIGHT` / `FPS` / `SERVER`
 
@@ -141,12 +142,11 @@ PI_ID=PI02 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
 # 中継サーバー
 ./relay/relay -addr :8080 -web web &
 
-# Pi役1 (PI01): 0=カラーバー(画面代用), 1=実Webカメラ, 2=ボール
+# Pi役1 (PI01): 1=実Webカメラ, 2=ボール (画面取得は既定で無効)
 PI_ID=PI01 ./publisher/publish-test.sh &
 
 # Pi役2 (PI02): 合成映像のみ (Webカメラは1台しか開けないため)
-PI_ID=PI02 CAM0="videotestsrc pattern=gradient" \
-  CAM1="videotestsrc pattern=snow" CAM2="videotestsrc pattern=circular" \
+PI_ID=PI02 CAM1="videotestsrc pattern=snow" CAM2="videotestsrc pattern=circular" \
   ./publisher/publish-test.sh &
 
 # ブラウザで http://localhost:8080/ (ID=PI01) / ?id=PI02 を開く
@@ -162,8 +162,8 @@ ffmpeg -i /tmp/x.h264 -update 1 /tmp/last.png   # 切替後(画面=カラーバ�
   受信は **1280x720 / H.264 Constrained Baseline / 約2.5Mbps** でデコード可能。
 - **複数ラズパイのID指定ルーティング**: PI01/PI02を同時接続し、`?id=`で別々の映像を取得。
   `GET /pis` で `["PI01","PI02"]` を確認。
-- **camChange**: ビュアーから PI01 を `0`(カラーバー=画面) / `1`(Webカメラ) / `2`(ボール) へ
-  無停止で切替えられることを、各切替後のデコードフレームで確認。
+- **camChange**: ビュアーから PI01 を `1`(Webカメラ) / `2`(ボール) へ無停止で切替えられることを、
+  各切替後のデコードフレームで確認（画面取得`0`はCAM0設定時のみ有効）。
 - **ファンアウト**: 複数ビュアー同時接続で各自が同一ストリームを受信（Pi上りは1本のまま）。
 - ヘッドレス視聴はブラウザと同一の署名/SDP/ICE/RTP/camChange経路を通るため、
   ブラウザ視聴経路の検証を兼ねる。
