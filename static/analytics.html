@@ -20,79 +20,7 @@
     .col--left { border-right: 1px solid var(--border); }
     .col--right { border-left: 1px solid var(--border); }
 
-    /* ---- タスク進行状況（他画面と共通） ---- */
-    .task-list {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 6px;
-      overflow-y: auto;
-    }
-    .task-group { border: 1px solid var(--border); background: var(--bg); }
-    .task-group__head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0.35rem 0.6rem;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface2);
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-    }
-    .task-group__title { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
-    .task-group__badge {
-      flex-shrink: 0;
-      font-size: 0.66rem;
-      font-weight: 700;
-      padding: 1px 7px;
-      border: 1px solid var(--warn);
-      border-radius: 9px;
-      background: var(--warn);
-      color: #ffffff;
-      white-space: nowrap;
-    }
-    .task-group__count { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
-    .task-group__count.is-complete { color: var(--ok); }
-    .task-group__bar { height: 3px; background: var(--surface2); }
-    .task-group__bar i { display: block; height: 100%; background: var(--ok); transition: width 0.3s; }
-    .task-row {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.4rem 0.6rem;
-      font-size: 0.82rem;
-      font-weight: 600;
-      border-top: 1px solid rgba(255, 255, 255, 0.18);
-    }
-    .task-row:first-child { border-top: none; }
-    .task-row__check {
-      flex-shrink: 0;
-      width: 16px;
-      height: 16px;
-      border: 1px solid var(--muted);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.68rem;
-      line-height: 1;
-      color: transparent;
-    }
-    .task-row.is-done .task-row__check {
-      background: var(--ok);
-      border-color: var(--ok);
-      color: #1e1e22;
-    }
-    .task-row.is-done { color: var(--muted); }
-    .task-row.is-done .task-row__label { text-decoration: line-through; }
-    .task-row.is-current {
-      background: rgba(91, 155, 213, 0.16);
-      border-left: 3px solid var(--accent);
-      padding-left: calc(0.6rem - 3px);
-    }
-    .task-row.is-current .task-row__check { border-color: var(--accent); }
+    /* タスク進行状況・通知バーは common.css の共通スタイルを使用 */
 
     /* ---- 中央 ステージ（大画面 ＋ 右200pxタイル） ---- */
     .stage {
@@ -377,27 +305,6 @@
       50% { background: #e8943a; }
     }
 
-    .notify-bar {
-      flex-shrink: 0;
-      min-height: 40px;
-      padding: 0.5rem 1rem;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface2);
-      font-size: 0.9rem;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      transition: background 0.3s;
-    }
-    .notify-bar.is-active {
-      background: #c46a1a;
-      animation: notifyPulse 1.2s ease-in-out 3;
-    }
-    .notify-bar__empty { color: var(--muted); font-weight: 400; }
-    @keyframes notifyPulse {
-      0%, 100% { background: #c46a1a; }
-      50% { background: #e8943a; }
-    }
   </style>
 </head>
 <body>
@@ -500,25 +407,7 @@
       const roomTabs = document.getElementById("roomTabs");
 
       let roomUnits = { A: 4, B: 3, C: 5 };
-      let lastNotifyTs = 0;
-
-      function showNotification(n) {
-        if (!n || !n.text) {
-          notifyText.textContent = "通知はありません";
-          notifyText.className = "notify-bar__empty";
-          notifyBar.classList.remove("is-active");
-          return;
-        }
-        notifyText.textContent = n.text;
-        notifyText.className = "";
-        if (n.active && n.timestamp !== lastNotifyTs) {
-          lastNotifyTs = n.timestamp;
-          notifyBar.classList.remove("is-active");
-          void notifyBar.offsetWidth;
-          notifyBar.classList.add("is-active");
-          setTimeout(function () { notifyBar.classList.remove("is-active"); }, 3600);
-        }
-      }
+      const showNotification = RC.createNotifier(notifyBar, notifyText);
       let currentTargetUnit = 0;
       let pendingRequestUnit = 0;
 
@@ -561,17 +450,7 @@
       });
 
       /* ---- 部屋ごとの解析内容（タブ切替・各部屋が独立した状態を保持） ---- */
-      const COLOR_OPTIONS = [
-        { name: "不明", swatch: "#888888" },
-        { name: "黒", swatch: "#111111" },
-        { name: "赤", swatch: "#e85d5d" },
-        { name: "緑", swatch: "#4caf50" },
-        { name: "青", swatch: "#3b6fd4" },
-        { name: "黄", swatch: "#e8c63a" },
-        { name: "紫", swatch: "#9b59d0" },
-        { name: "水", swatch: "#5bc8e8" },
-        { name: "白", swatch: "#f5f5f5" },
-      ];
+      const COLOR_OPTIONS = RC.COLOR_OPTIONS;
 
       function emptyRoom() {
         return { stove: "", stoveDone: false, injuryDone: false, color: "", colorDone: false, notes: "" };
@@ -688,50 +567,8 @@
       renderAnalysis();
 
       /* ---- タスク進行状況 ---- */
-      function renderTaskRows(tasks) {
-        let currentMarked = false;
-        return tasks
-          .map(function (t) {
-            let cls = "";
-            if (t.done) cls = " is-done";
-            else if (!currentMarked) { cls = " is-current"; currentMarked = true; }
-            return (
-              '<div class="task-row' + cls + '">' +
-              '<span class="task-row__check">✓</span>' +
-              '<span class="task-row__label">' + RC.escapeHtml(t.text) + "</span></div>"
-            );
-          })
-          .join("");
-      }
-      function renderTaskGroup(title, tasks, badge) {
-        const done = tasks.filter(function (t) { return t.done; }).length;
-        const total = tasks.length;
-        const pct = total ? Math.round((done / total) * 100) : 0;
-        const complete = done === total && total > 0;
-        return (
-          '<div class="task-group">' +
-          '<div class="task-group__head"><span class="task-group__title"><span>' +
-          RC.escapeHtml(title) + "</span>" +
-          (badge ? '<span class="task-group__badge">' + RC.escapeHtml(badge) + "</span>" : "") +
-          '</span><span class="task-group__count' + (complete ? " is-complete" : "") + '">' +
-          done + "/" + total + "</span></div>" +
-          '<div class="task-group__bar"><i style="width:' + pct + '%"></i></div>' +
-          renderTaskRows(tasks) + "</div>"
-        );
-      }
       function renderTasks(tasks) {
-        const list = tasks || [];
-        const common = list.filter(function (t) { return !t.room; });
-        let html = "";
-        if (common.length) html += renderTaskGroup("共通", common);
-        ["A", "B", "C"].forEach(function (room) {
-          const group = list.filter(function (t) { return t.room === room; });
-          if (group.length) {
-            const badge = roomUnits[room] ? roomUnits[room] + "号機対応中" : null;
-            html += renderTaskGroup("ルーム" + room, group, badge);
-          }
-        });
-        taskList.innerHTML = html;
+        RC.renderTasks(taskList, tasks, roomUnits);
       }
 
       const client = RC.createWsClient("analytics", {

@@ -202,6 +202,103 @@
     el.textContent = labels[status] || status;
   }
 
+  /* ---------- 共有定数 ---------- */
+
+  const ROOM_NAMES = { A: "広場", B: "暗室", C: "2階" };
+
+  const COLOR_OPTIONS = [
+    { name: "不明", swatch: "#888888" },
+    { name: "黒", swatch: "#111111" },
+    { name: "赤", swatch: "#e85d5d" },
+    { name: "緑", swatch: "#4caf50" },
+    { name: "青", swatch: "#3b6fd4" },
+    { name: "黄", swatch: "#e8c63a" },
+    { name: "紫", swatch: "#9b59d0" },
+    { name: "水", swatch: "#5bc8e8" },
+    { name: "白", swatch: "#f5f5f5" },
+  ];
+
+  /* ---------- タスク進行状況の描画 ---------- */
+
+  function renderTaskRows(tasks) {
+    let currentMarked = false;
+    return tasks
+      .map(function (t) {
+        let cls = "";
+        if (t.done) {
+          cls = " is-done";
+        } else if (!currentMarked) {
+          cls = " is-current";
+          currentMarked = true;
+        }
+        return (
+          '<div class="task-row' + cls + '" data-task-id="' + t.id +
+          '"><span class="task-row__check">✓</span>' +
+          '<span class="task-row__label">' + escapeHtml(t.text) + "</span></div>"
+        );
+      })
+      .join("");
+  }
+
+  function renderTaskGroup(title, tasks, badge) {
+    const done = tasks.filter(function (t) { return t.done; }).length;
+    const total = tasks.length;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const complete = done === total && total > 0;
+    return (
+      '<div class="task-group">' +
+      '<div class="task-group__head"><span class="task-group__title"><span>' +
+      escapeHtml(title) + "</span>" +
+      (badge ? '<span class="task-group__badge">' + escapeHtml(badge) + "</span>" : "") +
+      '</span><span class="task-group__count' + (complete ? " is-complete" : "") + '">' +
+      done + "/" + total + "</span></div>" +
+      '<div class="task-group__bar"><i style="width:' + pct + '%"></i></div>' +
+      renderTaskRows(tasks) + "</div>"
+    );
+  }
+
+  // タスク一覧を targetEl に描画する。roomUnits で各ルームの対応号機バッジを出す。
+  function renderTasks(targetEl, tasks, roomUnits) {
+    const list = tasks || [];
+    const units = roomUnits || {};
+    const common = list.filter(function (t) { return !t.room; });
+    let html = "";
+    if (common.length) html += renderTaskGroup("共通", common);
+    ["A", "B", "C"].forEach(function (room) {
+      const group = list.filter(function (t) { return t.room === room; });
+      if (group.length) {
+        const badge = units[room] ? units[room] + "号機対応中" : null;
+        html += renderTaskGroup("ルーム" + room, group, badge);
+      }
+    });
+    targetEl.innerHTML = html;
+  }
+
+  /* ---------- 通知バー ---------- */
+
+  // 通知バー要素を渡すと showNotification(notification) 関数を返す。
+  // 新着(active かつ timestamp が前回と異なる)時だけパルスさせる。
+  function createNotifier(barEl, textEl) {
+    let lastTs = 0;
+    return function (n) {
+      if (!n || !n.text) {
+        textEl.textContent = "通知はありません";
+        textEl.className = "notify-bar__empty";
+        barEl.classList.remove("is-active");
+        return;
+      }
+      textEl.textContent = n.text;
+      textEl.className = "";
+      if (n.active && n.timestamp !== lastTs) {
+        lastTs = n.timestamp;
+        barEl.classList.remove("is-active");
+        void barEl.offsetWidth;
+        barEl.classList.add("is-active");
+        setTimeout(function () { barEl.classList.remove("is-active"); }, 3600);
+      }
+    };
+  }
+
   global.RescueCommon = {
     wsUrl: wsUrl,
     escapeHtml: escapeHtml,
@@ -211,6 +308,10 @@
     initVideos: initVideos,
     createWsClient: createWsClient,
     setConnBadge: setConnBadge,
+    renderTasks: renderTasks,
+    createNotifier: createNotifier,
+    ROOM_NAMES: ROOM_NAMES,
+    COLOR_OPTIONS: COLOR_OPTIONS,
     COLORS: COLORS,
   };
 })(window);
