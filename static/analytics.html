@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>アナリティクスモード</title>
+  <link rel="stylesheet" href="/static/common.css" />
+  <style>
+    .analytics-body {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 240px 1fr 300px;
+    }
+    .col {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .col--left { border-right: 1px solid var(--border); }
+    .col--right { border-left: 1px solid var(--border); }
+
+    /* ---- タスク進行状況（他画面と共通） ---- */
+    .task-list {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 6px;
+      overflow-y: auto;
+    }
+    .task-group { border: 1px solid var(--border); background: var(--bg); }
+    .task-group__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.35rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .task-group__title { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+    .task-group__badge {
+      flex-shrink: 0;
+      font-size: 0.66rem;
+      font-weight: 700;
+      padding: 1px 7px;
+      border: 1px solid var(--warn);
+      border-radius: 9px;
+      background: var(--warn);
+      color: #ffffff;
+      white-space: nowrap;
+    }
+    .task-group__count { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+    .task-group__count.is-complete { color: var(--ok); }
+    .task-group__bar { height: 3px; background: var(--surface2); }
+    .task-group__bar i { display: block; height: 100%; background: var(--ok); transition: width 0.3s; }
+    .task-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    .task-row:first-child { border-top: none; }
+    .task-row__check {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--muted);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.68rem;
+      line-height: 1;
+      color: transparent;
+    }
+    .task-row.is-done .task-row__check {
+      background: var(--ok);
+      border-color: var(--ok);
+      color: #1e1e22;
+    }
+    .task-row.is-done { color: var(--muted); }
+    .task-row.is-done .task-row__label { text-decoration: line-through; }
+    .task-row.is-current {
+      background: rgba(91, 155, 213, 0.16);
+      border-left: 3px solid var(--accent);
+      padding-left: calc(0.6rem - 3px);
+    }
+    .task-row.is-current .task-row__check { border-color: var(--accent); }
+
+    /* ---- 中央 ステージ（大画面 ＋ 右200pxタイル） ---- */
+    .stage {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 200px;
+      grid-template-rows: 1fr 1fr 1fr;
+      grid-template-areas:
+        "main r1"
+        "main r2"
+        "main r3";
+      gap: 4px;
+      padding: 4px;
+    }
+    .view {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      cursor: pointer;
+    }
+    .view .video-box { flex: 1; }
+    .stage .video-box video { object-fit: contain; }
+    .view--ten { grid-area: r1; }
+    .view--target { grid-area: r2; }
+    .view--audio {
+      grid-area: r3;
+      border: 1px solid var(--border);
+      background: #1e1e22;
+      position: relative;
+    }
+    .view--audio__label {
+      position: absolute;
+      left: 6px;
+      top: 6px;
+      z-index: 2;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid var(--border);
+      pointer-events: none;
+    }
+    .view--audio iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      pointer-events: none;
+    }
+
+    .ph {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #2fa8d8;
+      color: #ffffff;
+      font-size: 0.85rem;
+      font-weight: 700;
+      border: 1px solid var(--border);
+    }
+    #phTen { grid-area: r1; }
+    #phTarget { grid-area: r2; }
+    #phAudio { grid-area: r3; }
+
+    .stage[data-sel="ten"] .view--ten { grid-area: main; }
+    .stage[data-sel="ten"] #phTen { display: flex; }
+    .stage[data-sel="target"] .view--target { grid-area: main; }
+    .stage[data-sel="target"] #phTarget { display: flex; }
+    .stage[data-sel="audio"] .view--audio { grid-area: main; }
+    .stage[data-sel="audio"] #phAudio { display: flex; }
+    .stage[data-sel="audio"] .view--audio iframe { pointer-events: auto; }
+
+    /* ---- 右：解析入力 ---- */
+    .target-label {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .target-label span { color: var(--accent); }
+    .analysis-panel {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .analysis-status {
+      padding: 0.4rem 0.75rem;
+      font-size: 0.78rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--warn);
+    }
+    .analysis-form { padding: 8px; display: flex; flex-direction: column; }
+    .ana-block { display: flex; flex-direction: column; gap: 6px; margin-bottom: 26px; }
+    .ana-block:last-child { margin-bottom: 0; }
+    .ana-block__label { margin: 0; font-size: 0.78rem; font-weight: 700; color: var(--muted); }
+    .opt-btns {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+      gap: 4px;
+    }
+    .color-btns {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+      gap: 4px;
+    }
+    .opt-btn {
+      padding: 0.4rem 0.6rem;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .color-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      padding: 0.35rem 0.5rem;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .opt-btn.is-selected,
+    .color-btn.is-selected {
+      background: #2fa8d8;
+      border-color: #2fa8d8;
+      color: #ffffff;
+      font-weight: 700;
+    }
+    .opt-btn:disabled,
+    .color-btn:disabled { cursor: default; opacity: 0.85; }
+    .color-btn__swatch {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      flex-shrink: 0;
+    }
+    .ana-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .ana-row__label { font-size: 0.82rem; font-weight: 700; }
+    .ana-row__value { font-size: 0.82rem; color: var(--muted); }
+    .confirm2 {
+      padding: 0.45rem 0.7rem;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #ffffff;
+      background: #d97a1f;
+      border: 1px solid #d97a1f;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .confirm2--wide { width: 100%; }
+    .confirm2:hover { background: #e8943a; border-color: #e8943a; }
+    .confirm2.is-confirmed {
+      background: #2f8f46;
+      border-color: #2f8f46;
+      color: #ffffff;
+    }
+    .confirm2.is-flash {
+      background: #2f8f46;
+      border-color: #2f8f46;
+      color: #ffffff;
+    }
+
+    /* ---- 中央ビュー下部：号機選択バー ---- */
+    .unit-bar {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: flex-end;
+      gap: 25px;
+      padding: 6px;
+      border-top: 1px solid var(--border);
+    }
+    .unit-btn-c {
+      padding: 0.5rem 0.6rem;
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      min-width: 44px;
+      text-align: center;
+    }
+    .unit-btn-c:hover:not(.is-selected) { border-color: var(--accent); }
+    .unit-btn-c.is-disabled { color: var(--danger); }
+    .unit-btn-c.is-selected {
+      background: #2fa8d8;
+      border-color: #2fa8d8;
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(47, 168, 216, 0.7);
+    }
+
+    /* ---- 解析：部屋タブ ---- */
+    .room-tabs {
+      flex-shrink: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      padding: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .room-tab {
+      padding: 0.55rem 0;
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--text);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .room-tab:hover:not(.is-active) { border-color: var(--accent); }
+    .room-tab.is-active {
+      background: #d83a3a;
+      border-color: #d83a3a;
+      color: #ffffff;
+      box-shadow: 0 0 12px rgba(216, 58, 58, 0.75);
+    }
+    .notes-area {
+      width: 100%;
+      min-height: 70px;
+      padding: 0.45rem 0.5rem;
+      font-family: inherit;
+      font-size: 0.82rem;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      resize: vertical;
+    }
+
+    .master-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .master-overlay[hidden] { display: none; }
+    .master-overlay__box {
+      width: min(480px, 90vw);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      padding: 1.25rem;
+    }
+    .master-overlay__box h2 { margin: 0 0 0.75rem; font-size: 1.15rem; color: var(--warn); }
+    .master-overlay__box ul { margin: 0; padding-left: 1.2rem; font-size: 0.95rem; line-height: 1.6; }
+
+    .analysis-request-bar {
+      flex-shrink: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      min-height: 52px;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: #c46a1a;
+      font-size: 1.05rem;
+      font-weight: 700;
+      animation: requestPulse 1.2s ease-in-out infinite;
+    }
+    .analysis-request-bar.is-visible { display: flex; }
+    .analysis-request-bar__hint { font-size: 0.82rem; font-weight: 600; color: rgba(255, 255, 255, 0.85); }
+    @keyframes requestPulse {
+      0%, 100% { background: #c46a1a; }
+      50% { background: #e8943a; }
+    }
+
+    .notify-bar {
+      flex-shrink: 0;
+      min-height: 40px;
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      font-size: 0.9rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      transition: background 0.3s;
+    }
+    .notify-bar.is-active {
+      background: #c46a1a;
+      animation: notifyPulse 1.2s ease-in-out 3;
+    }
+    .notify-bar__empty { color: var(--muted); font-weight: 400; }
+    @keyframes notifyPulse {
+      0%, 100% { background: #c46a1a; }
+      50% { background: #e8943a; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="app-header__title">アナリティクスモード</h1>
+      <span class="conn-badge connecting" id="connBadge">接続中…</span>
+    </header>
+    <div class="notify-bar" id="notifyBar" aria-live="polite">
+      <span class="notify-bar__empty" id="notifyText">通知はありません</span>
+    </div>
+    <div class="analysis-request-bar" id="analysisRequestBar" aria-live="assertive">
+      <span id="analysisRequestText">解析要請　1号機</span>
+      <span class="analysis-request-bar__hint">Enter で承諾</span>
+    </div>
+    <main class="app-main analytics-body">
+      <aside class="col col--left panel">
+        <h2 class="panel-title">タスク進行状況</h2>
+        <div class="task-list" id="taskList"></div>
+      </aside>
+
+      <section class="col panel">
+        <h2 class="panel-title">監視映像</h2>
+        <div class="stage" id="stage" data-sel="target">
+          <div class="view view--ten" data-view="ten" id="viewTen"></div>
+          <div class="view view--target" data-view="target" id="viewTarget"></div>
+          <div class="view view--audio" data-view="audio" id="viewAudio">
+            <span class="view--audio__label">音声解析</span>
+            <iframe src="/static/audio_analyzer.html" title="音声解析ツール"></iframe>
+          </div>
+          <div class="ph" id="phTen">天カメ</div>
+          <div class="ph" id="phTarget">対象機</div>
+          <div class="ph" id="phAudio">音声解析</div>
+        </div>
+        <div class="unit-bar" id="unitBar"></div>
+      </section>
+
+      <aside class="col col--right panel">
+        <div class="room-tabs" id="roomTabs">
+          <button type="button" class="room-tab" data-room="A">広場</button>
+          <button type="button" class="room-tab" data-room="B">暗室</button>
+          <button type="button" class="room-tab" data-room="C">2階</button>
+        </div>
+        <div class="analysis-panel">
+          <div class="analysis-form">
+            <div class="ana-block">
+              <p class="ana-block__label">ストーブの有無</p>
+              <div class="opt-btns" id="stoveBtns"></div>
+              <button type="button" class="confirm2 confirm2--wide" data-confirm="stove">結果確定</button>
+            </div>
+
+            <div class="ana-block">
+              <p class="ana-block__label">負傷状況</p>
+              <div class="ana-row">
+                <span class="ana-row__label">QR：</span>
+                <span class="ana-row__value">読み取り中</span>
+              </div>
+              <button type="button" class="confirm2 confirm2--wide" data-confirm="injury">結果確定</button>
+            </div>
+
+            <div class="ana-block">
+              <p class="ana-block__label">顔色</p>
+              <div class="color-btns" id="colorBtns"></div>
+              <button type="button" class="confirm2 confirm2--wide" data-confirm="color">結果確定</button>
+            </div>
+
+            <div class="ana-block">
+              <p class="ana-block__label">備考</p>
+              <textarea class="notes-area" id="notesArea" placeholder="自由記述"></textarea>
+              <button type="button" class="confirm2 confirm2--wide" id="notesUpdate">更新</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <div class="master-overlay" id="masterOverlay" hidden>
+    <div class="master-overlay__box">
+      <h2 id="overlayTitle">撮影指示</h2>
+      <ul id="overlayLines"></ul>
+    </div>
+  </div>
+  <script src="/static/common.js"></script>
+  <script>
+    (function () {
+      const RC = window.RescueCommon;
+      const taskList = document.getElementById("taskList");
+      const masterOverlay = document.getElementById("masterOverlay");
+      const overlayTitle = document.getElementById("overlayTitle");
+      const overlayLines = document.getElementById("overlayLines");
+      const connBadge = document.getElementById("connBadge");
+      const notifyBar = document.getElementById("notifyBar");
+      const notifyText = document.getElementById("notifyText");
+      const analysisRequestBar = document.getElementById("analysisRequestBar");
+      const analysisRequestText = document.getElementById("analysisRequestText");
+      const stage = document.getElementById("stage");
+      const viewTen = document.getElementById("viewTen");
+      const viewTarget = document.getElementById("viewTarget");
+      const unitBar = document.getElementById("unitBar");
+      const roomTabs = document.getElementById("roomTabs");
+
+      let roomUnits = { A: 4, B: 3, C: 5 };
+      let lastNotifyTs = 0;
+
+      function showNotification(n) {
+        if (!n || !n.text) {
+          notifyText.textContent = "通知はありません";
+          notifyText.className = "notify-bar__empty";
+          notifyBar.classList.remove("is-active");
+          return;
+        }
+        notifyText.textContent = n.text;
+        notifyText.className = "";
+        if (n.active && n.timestamp !== lastNotifyTs) {
+          lastNotifyTs = n.timestamp;
+          notifyBar.classList.remove("is-active");
+          void notifyBar.offsetWidth;
+          notifyBar.classList.add("is-active");
+          setTimeout(function () { notifyBar.classList.remove("is-active"); }, 3600);
+        }
+      }
+      let currentTargetUnit = 0;
+      let pendingRequestUnit = 0;
+
+      /* 天カメ（1号機）は一度だけ構築。複製せず同一要素を CSS で移動 */
+      viewTen.innerHTML = RC.videoBox(1, "", { label: "天カメ（1号機）" });
+      RC.initVideos(viewTen);
+
+      function renderTargetVideo(unit) {
+        if (unit === currentTargetUnit) return;
+        currentTargetUnit = unit;
+        viewTarget.innerHTML = RC.videoBox(unit, "", { label: "対象機（" + unit + "号機）" });
+        RC.initVideos(viewTarget);
+      }
+
+      /* ビュー選択：選ばれたものを中央へ（CSS grid-area で移動） */
+      stage.addEventListener("click", function (e) {
+        const view = e.target.closest(".view");
+        if (!view) return;
+        stage.dataset.sel = view.dataset.view;
+      });
+
+      /* ---- 号機選択バー（背景色で選択状態を表示） ---- */
+      let selectedUnit = 1;
+      unitBar.innerHTML = [1, 2, 3, 4, 5]
+        .map(function (n) {
+          return '<button type="button" class="unit-btn-c" data-unit="' + n + '">' + n + "</button>";
+        })
+        .join("");
+      function renderUnitBar(units) {
+        unitBar.querySelectorAll(".unit-btn-c").forEach(function (b) {
+          const n = parseInt(b.dataset.unit, 10);
+          b.classList.toggle("is-selected", n === selectedUnit);
+          b.classList.toggle("is-disabled", !!(units && units[n] && units[n].disabled));
+        });
+      }
+      unitBar.addEventListener("click", function (e) {
+        const btn = e.target.closest(".unit-btn-c");
+        if (!btn) return;
+        client.send({ type: "set_analytics_target", unit: parseInt(btn.dataset.unit, 10) });
+      });
+
+      /* ---- 部屋ごとの解析内容（タブ切替・各部屋が独立した状態を保持） ---- */
+      const COLOR_OPTIONS = [
+        { name: "不明", swatch: "#888888" },
+        { name: "黒", swatch: "#111111" },
+        { name: "赤", swatch: "#e85d5d" },
+        { name: "緑", swatch: "#4caf50" },
+        { name: "青", swatch: "#3b6fd4" },
+        { name: "黄", swatch: "#e8c63a" },
+        { name: "紫", swatch: "#9b59d0" },
+        { name: "水", swatch: "#5bc8e8" },
+        { name: "白", swatch: "#f5f5f5" },
+      ];
+
+      function emptyRoom() {
+        return { stove: "", stoveDone: false, injuryDone: false, color: "", colorDone: false, notes: "" };
+      }
+      let roomAnalysis = { A: emptyRoom(), B: emptyRoom(), C: emptyRoom() };
+      let activeRoom = "A";
+      function cur() { return roomAnalysis[activeRoom]; }
+      function pushRoom(fields) {
+        const payload = { type: "set_room_analysis", room: activeRoom };
+        Object.keys(fields).forEach(function (k) { payload[k] = fields[k]; });
+        client.send(payload);
+      }
+
+      const stoveBtns = document.getElementById("stoveBtns");
+      const colorBtns = document.getElementById("colorBtns");
+      const notesArea = document.getElementById("notesArea");
+      const stoveConfirm = document.querySelector('[data-confirm="stove"]');
+      const injuryConfirm = document.querySelector('[data-confirm="injury"]');
+      const colorConfirm = document.querySelector('[data-confirm="color"]');
+      const notesUpdate = document.getElementById("notesUpdate");
+
+      function confirmBtn(btn, done) {
+        btn.textContent = done ? "撤回する" : "確定する";
+        btn.classList.toggle("is-confirmed", done);
+      }
+
+      function renderStove() {
+        const s = cur();
+        stoveBtns.innerHTML = ["不明", "無し", "有り"]
+          .map(function (v) {
+            return (
+              '<button type="button" class="opt-btn' +
+              (s.stove === v ? " is-selected" : "") +
+              '" data-val="' + v + '"' + (s.stoveDone ? " disabled" : "") + ">" + v + "</button>"
+            );
+          })
+          .join("");
+        confirmBtn(stoveConfirm, s.stoveDone);
+      }
+      function renderColor() {
+        const s = cur();
+        colorBtns.innerHTML = COLOR_OPTIONS.map(function (c) {
+          return (
+            '<button type="button" class="color-btn' +
+            (s.color === c.name ? " is-selected" : "") +
+            '" data-val="' + c.name + '"' + (s.colorDone ? " disabled" : "") +
+            '><span class="color-btn__swatch" style="background:' + c.swatch +
+            '"></span>' + c.name + "</button>"
+          );
+        }).join("");
+        confirmBtn(colorConfirm, s.colorDone);
+      }
+      function renderInjury() { confirmBtn(injuryConfirm, cur().injuryDone); }
+      function renderNotes() {
+        if (document.activeElement !== notesArea) notesArea.value = cur().notes;
+      }
+      function renderRoomTabs() {
+        roomTabs.querySelectorAll(".room-tab").forEach(function (t) {
+          t.classList.toggle("is-active", t.dataset.room === activeRoom);
+        });
+      }
+      function renderAnalysis() {
+        renderRoomTabs();
+        renderStove();
+        renderInjury();
+        renderColor();
+        renderNotes();
+      }
+
+      roomTabs.addEventListener("click", function (e) {
+        const tab = e.target.closest(".room-tab");
+        if (!tab) return;
+        activeRoom = tab.dataset.room;
+        renderAnalysis();
+      });
+
+      stoveBtns.addEventListener("click", function (e) {
+        const btn = e.target.closest(".opt-btn");
+        if (!btn || btn.disabled) return;
+        cur().stove = btn.dataset.val;
+        renderStove();
+        pushRoom({ stove: btn.dataset.val });
+      });
+      colorBtns.addEventListener("click", function (e) {
+        const btn = e.target.closest(".color-btn");
+        if (!btn || btn.disabled) return;
+        cur().color = btn.dataset.val;
+        renderColor();
+      });
+      stoveConfirm.addEventListener("click", function () {
+        cur().stoveDone = !cur().stoveDone;
+        renderStove();
+        pushRoom({ stoveDone: cur().stoveDone });
+      });
+      injuryConfirm.addEventListener("click", function () {
+        cur().injuryDone = !cur().injuryDone;
+        renderInjury();
+        pushRoom({ injuryDone: cur().injuryDone });
+      });
+      colorConfirm.addEventListener("click", function () {
+        cur().colorDone = !cur().colorDone;
+        renderColor();
+        pushRoom({ color: cur().color, colorDone: cur().colorDone });
+      });
+      notesArea.addEventListener("input", function () { cur().notes = notesArea.value; });
+      notesUpdate.addEventListener("click", function () {
+        pushRoom({ notes: notesArea.value });
+        notesUpdate.classList.remove("is-flash");
+        void notesUpdate.offsetWidth;
+        notesUpdate.classList.add("is-flash");
+        setTimeout(function () { notesUpdate.classList.remove("is-flash"); }, 600);
+      });
+
+      renderAnalysis();
+
+      /* ---- タスク進行状況 ---- */
+      function renderTaskRows(tasks) {
+        let currentMarked = false;
+        return tasks
+          .map(function (t) {
+            let cls = "";
+            if (t.done) cls = " is-done";
+            else if (!currentMarked) { cls = " is-current"; currentMarked = true; }
+            return (
+              '<div class="task-row' + cls + '">' +
+              '<span class="task-row__check">✓</span>' +
+              '<span class="task-row__label">' + RC.escapeHtml(t.text) + "</span></div>"
+            );
+          })
+          .join("");
+      }
+      function renderTaskGroup(title, tasks, badge) {
+        const done = tasks.filter(function (t) { return t.done; }).length;
+        const total = tasks.length;
+        const pct = total ? Math.round((done / total) * 100) : 0;
+        const complete = done === total && total > 0;
+        return (
+          '<div class="task-group">' +
+          '<div class="task-group__head"><span class="task-group__title"><span>' +
+          RC.escapeHtml(title) + "</span>" +
+          (badge ? '<span class="task-group__badge">' + RC.escapeHtml(badge) + "</span>" : "") +
+          '</span><span class="task-group__count' + (complete ? " is-complete" : "") + '">' +
+          done + "/" + total + "</span></div>" +
+          '<div class="task-group__bar"><i style="width:' + pct + '%"></i></div>' +
+          renderTaskRows(tasks) + "</div>"
+        );
+      }
+      function renderTasks(tasks) {
+        const list = tasks || [];
+        const common = list.filter(function (t) { return !t.room; });
+        let html = "";
+        if (common.length) html += renderTaskGroup("共通", common);
+        ["A", "B", "C"].forEach(function (room) {
+          const group = list.filter(function (t) { return t.room === room; });
+          if (group.length) {
+            const badge = roomUnits[room] ? roomUnits[room] + "号機対応中" : null;
+            html += renderTaskGroup("ルーム" + room, group, badge);
+          }
+        });
+        taskList.innerHTML = html;
+      }
+
+      const client = RC.createWsClient("analytics", {
+        onStatus: function (s) { RC.setConnBadge(connBadge, s); },
+        onState: applyState,
+      });
+
+      function applyState(st) {
+        roomUnits = st.room_units || roomUnits;
+        showNotification(st.notification);
+        renderTasks(st.tasks);
+
+        const unit = st.analytics_target_unit || 1;
+        selectedUnit = unit;
+        renderUnitBar(st.units || {});
+        renderTargetVideo(unit);
+
+        if (st.room_analysis) {
+          roomAnalysis = st.room_analysis;
+          if (document.activeElement === notesArea) {
+            roomAnalysis[activeRoom].notes = notesArea.value;
+          }
+          renderAnalysis();
+        }
+
+        const req = st.analysis_request || {};
+        if (req.pending && req.unit >= 1 && req.unit <= 5) {
+          pendingRequestUnit = req.unit;
+          analysisRequestText.textContent = "解析要請　" + req.unit + "号機";
+          analysisRequestBar.classList.add("is-visible");
+        } else {
+          pendingRequestUnit = 0;
+          analysisRequestBar.classList.remove("is-visible");
+        }
+
+        const ov = st.master_overlay || {};
+        if (ov.visible) {
+          overlayTitle.textContent = ov.title || "撮影指示";
+          overlayLines.innerHTML = (ov.lines || [])
+            .map(function (line) { return "<li>" + RC.escapeHtml(line) + "</li>"; })
+            .join("");
+          masterOverlay.hidden = false;
+        } else {
+          masterOverlay.hidden = true;
+        }
+      }
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        if (e.target.matches("input, textarea, button")) return;
+        if (!pendingRequestUnit) return;
+        e.preventDefault();
+        client.send({ type: "accept_analysis_request" });
+      });
+    })();
+  </script>
+  <script src="/voice/voice-client.js"></script>
+  <script>VoiceComm.init({ role: "解析" });</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>レスキューロボコン — ダミーアプリ一覧</title>
+  <link rel="stylesheet" href="/static/common.css" />
+  <style>
+    .index-main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .index-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      width: min(900px, 100%);
+    }
+    .index-link {
+      display: block;
+      padding: 1.25rem 1rem;
+      text-decoration: none;
+      color: var(--text);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      text-align: center;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .index-link:hover { background: var(--surface2); }
+    .index-link small {
+      display: block;
+      margin-top: 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 400;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="app-header__title">レスキューロボコン ダミー操作画面</h1>
+    </header>
+    <main class="index-main">
+      <nav class="index-grid" aria-label="アプリ一覧">
+        <a class="index-link" href="/control">コントロールモード<small>操縦担当</small></a>
+        <a class="index-link" href="/analytics">アナリティクスモード<small>解析担当</small></a>
+        <a class="index-link" href="/engineer">エンジニアモード<small>監視エンジニア</small></a>
+        <a class="index-link" href="/reporter">報告者モード<small>スマホ向け</small></a>
+        <a class="index-link" href="/master">マスターモード<small>撮影進行</small></a>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>
