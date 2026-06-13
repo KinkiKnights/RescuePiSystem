@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebRTC Camera Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+  header { padding: 10px 16px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  #status { font-size: 13px; padding: 2px 10px; border-radius: 10px; background: #333; }
+  #status.live { background: #1b5e20; }
+  #status.err  { background: #7f1d1d; }
+  #stats { font-size: 12px; color: #9aa; margin-left: auto; font-variant-numeric: tabular-nums; }
+  video { width: 100%; height: calc(100vh - 52px); background: #000; object-fit: contain; }
+  button { background: #2563eb; color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📷 WebRTC Camera</h1>
+  <span id="status">未接続</span>
+  <button id="connect">接続</button>
+  <span id="stats"></span>
+</header>
+<video id="video" autoplay playsinline muted controls></video>
+
+<script>
+const statusEl = document.getElementById('status');
+const statsEl  = document.getElementById('stats');
+const video    = document.getElementById('video');
+const btn      = document.getElementById('connect');
+
+let pc, ws, statsTimer;
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = cls || '';
+}
+
+function connect() {
+  btn.disabled = true;
+  setStatus('接続中…');
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  pc = new RTCPeerConnection(); // LAN内なのでICEサーバ不要
+
+  // サーバーが送信専用トラックを乗せてくる
+  pc.ontrack = (e) => {
+    video.srcObject = e.streams[0] || new MediaStream([e.track]);
+  };
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    const s = pc.connectionState;
+    if (s === 'connected') { setStatus('● LIVE', 'live'); startStats(); }
+    else if (s === 'failed' || s === 'disconnected' || s === 'closed') {
+      setStatus('切断', 'err'); stopStats(); btn.disabled = false;
+    }
+  };
+
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', role: 'viewer' }));
+
+  ws.onmessage = async (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'offer') {
+      // viewerはアンサー側
+      await pc.setRemoteDescription(msg.sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify({ type: 'answer', sdp: pc.localDescription }));
+    } else if (msg.type === 'candidate') {
+      try { await pc.addIceCandidate(msg.candidate); } catch (e) { console.warn(e); }
+    } else if (msg.type === 'error') {
+      setStatus('エラー: ' + msg.message, 'err');
+      btn.disabled = false;
+    }
+  };
+
+  ws.onclose = () => { stopStats(); btn.disabled = false; };
+  ws.onerror = () => setStatus('WS接続失敗', 'err');
+}
+
+// 受信ビットレート/解像度/遅延の簡易表示
+function startStats() {
+  let lastBytes = 0, lastTs = 0;
+  statsTimer = setInterval(async () => {
+    const stats = await pc.getStats();
+    stats.forEach((r) => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        const now = r.timestamp;
+        let kbps = 0;
+        if (lastTs) kbps = Math.round(((r.bytesReceived - lastBytes) * 8) / (now - lastTs));
+        lastBytes = r.bytesReceived; lastTs = now;
+        const w = video.videoWidth, h = video.videoHeight;
+        const jitter = r.jitter ? (r.jitter * 1000).toFixed(0) + 'ms' : '-';
+        statsEl.textContent = `${w}x${h}  ${kbps} kbps  fps:${Math.round(r.framesPerSecond||0)}  jitter:${jitter}`;
+      }
+    });
+  }, 1000);
+}
+function stopStats() { clearInterval(statsTimer); statsEl.textContent = ''; }
+
+btn.onclick = connect;
+connect(); // 自動接続
+</script>
+</body>
+</html>
