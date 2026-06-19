@@ -65,6 +65,32 @@
       font-size: 0.75rem;
       color: var(--muted);
     }
+    .unit-ip-table {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .unit-ip-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .unit-ip-row__label {
+      flex-shrink: 0;
+      width: 4rem;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .unit-ip-row input {
+      flex: 1;
+      min-width: 0;
+      padding: 0.45rem 0.6rem;
+      font-family: inherit;
+      font-size: 0.82rem;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -118,6 +144,19 @@
           <button type="button" class="btn" data-overlay="scene1">シーン1 指示表示</button>
           <button type="button" class="btn" data-overlay="scene2">シーン2 指示表示</button>
           <button type="button" class="btn btn--wide" data-action="hide_overlay">オーバーレイ非表示</button>
+        </div>
+      </section>
+      <section>
+        <h2 class="section-title">号機 IP アドレス（joy_node_web 接続先）</h2>
+        <div class="unit-ip-table" id="unitIpTable">
+          <div class="unit-ip-row"><span class="unit-ip-row__label">1号機</span><input type="text" data-unit-ip="1" placeholder="192.168.x.x"></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">2号機</span><input type="text" data-unit-ip="2" placeholder="192.168.x.x"></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">3号機</span><input type="text" data-unit-ip="3" placeholder="192.168.x.x"></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">4号機</span><input type="text" data-unit-ip="4" placeholder="192.168.x.x"></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">5号機</span><input type="text" data-unit-ip="5" placeholder="192.168.x.x"></div>
+        </div>
+        <div class="relay-row" style="margin-top:6px">
+          <button type="button" class="btn btn--wide" id="unitIpsSave" style="flex:1">IPアドレスを保存</button>
         </div>
       </section>
       <section>
@@ -212,6 +251,12 @@
             "（1〜5号機 → カメラID RES1〜RES5）" +
             (server ? "　中継: " + server : "");
           if (document.activeElement !== relayInput && server) relayInput.value = server;
+          const ips = st.unit_ips || {};
+          document.querySelectorAll("[data-unit-ip]").forEach(function (inp) {
+            if (document.activeElement !== inp) {
+              inp.value = ips[inp.dataset.unitIp] || "";
+            }
+          });
         },
       });
 
@@ -231,6 +276,15 @@
           postMaster({ action: "set_video_mode", mode: mode });
           log("映像ソース → " + (mode === "webrtc" ? "WebRTC（実機カメラ）" : "動画ファイル"));
         });
+      });
+
+      document.getElementById("unitIpsSave").addEventListener("click", function () {
+        const ips = {};
+        document.querySelectorAll("[data-unit-ip]").forEach(function (inp) {
+          ips[inp.dataset.unitIp] = inp.value.trim();
+        });
+        postMaster({ action: "set_unit_ips", unit_ips: ips });
+        log("号機IPアドレスを保存");
       });
 
       document.getElementById("relaySet").addEventListener("click", function () {

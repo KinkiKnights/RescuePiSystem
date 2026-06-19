@@ -117,6 +117,7 @@ class AppState:
             "unit": 0,
             "timestamp": 0,
         }
+        self.unit_ips: dict[int, str] = {i: "" for i in range(1, 6)}
         self.lock = asyncio.Lock()
 
     def snapshot(self) -> dict[str, Any]:
@@ -135,6 +136,7 @@ class AppState:
             "master_overlay": deepcopy(self.master_overlay),
             "analysis_request": dict(self.analysis_request),
             "control_request": dict(self.control_request),
+            "unit_ips": {str(k): v for k, v in self.unit_ips.items()},
         }
 
     async def push_notification(self, text: str) -> None:
@@ -168,6 +170,7 @@ class AppState:
         self.master_overlay = {"visible": False, "title": "", "lines": []}
         self.analysis_request = {"pending": False, "unit": 0, "timestamp": 0}
         self.control_request = {"pending": False, "unit": 0, "timestamp": 0}
+        self.unit_ips = {i: "" for i in range(1, 6)}
 
 
 state = AppState()
@@ -305,6 +308,15 @@ async def post_master(body: dict[str, Any]) -> dict[str, str]:
                 if t["room"] == room and not t["done"]:
                     t["done"] = True
                     break
+        elif action == "set_unit_ips":
+            ips = body.get("unit_ips", {})
+            for k, v in ips.items():
+                try:
+                    n = int(k)
+                    if 1 <= n <= 5:
+                        state.unit_ips[n] = str(v).strip()
+                except (ValueError, TypeError):
+                    pass
         elif action == "reset":
             state.reset()
     snap = state.snapshot()

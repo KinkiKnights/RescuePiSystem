@@ -105,21 +105,11 @@
       color: var(--muted);
     }
     .joy-ws {
-      padding: 6px;
+      padding: 5px 6px;
       border-top: 1px solid var(--border);
       display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .joy-ws__label {
-      font-size: 0.72rem;
-      color: var(--muted);
-      padding: 0 2px;
-    }
-    .joy-ws__row {
-      display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
     }
     .joy-ws__dot {
       width: 9px;
@@ -131,15 +121,12 @@
     .joy-ws__dot--ok { background: #4f4; }
     .joy-ws__dot--connecting { background: #fa0; }
     .joy-ws__dot--err { background: #f44; }
-    .joy-ws__input {
-      flex: 1;
-      min-width: 0;
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-      padding: 3px 6px;
-      font-size: 0.73rem;
-      font-family: inherit;
+    .joy-ws__label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .unit-btn.is-requested {
       background: #c46a1a;
@@ -466,15 +453,8 @@
           <h2 class="panel-title">コントローラ選択</h2>
           <div class="ctrl-select" id="ctrlSelect"></div>
           <div class="joy-ws">
-            <span class="joy-ws__label">joy_node_web 送信先</span>
-            <div class="joy-ws__row">
-              <span class="joy-ws__dot" id="joyWsDot"></span>
-              <input class="joy-ws__input" type="text" id="joyWsUrl" placeholder="ws://host:8700/joys">
-            </div>
-            <div class="joy-ws__row">
-              <button type="button" class="ctrl-btn" id="joyWsConnect">接続</button>
-              <button type="button" class="ctrl-btn" id="joyWsDisconnect">切断</button>
-            </div>
+            <span class="joy-ws__dot" id="joyWsDot"></span>
+            <span class="joy-ws__label" id="joyWsStatus">joy: 未接続</span>
           </div>
         </section>
       </div>
@@ -720,42 +700,40 @@
         renderControllers();
       });
 
-      // ---- joy_node_web WebSocket ----
-      const joyWsUrlInput = document.getElementById("joyWsUrl");
+      // ---- joy_node_web WebSocket（号機連動自動接続）----
       const joyWsDot = document.getElementById("joyWsDot");
-      const joyWsConnectBtn = document.getElementById("joyWsConnect");
-      const joyWsDisconnectBtn = document.getElementById("joyWsDisconnect");
-
-      joyWsUrlInput.value = "ws://" + location.hostname + ":8700/joys";
+      const joyWsStatus = document.getElementById("joyWsStatus");
 
       let joyWs = null;
-      let joyWsTrying = false;
+      let joyCurrentIp = "";
 
       function setJoyDot(s) {
         joyWsDot.className = "joy-ws__dot" + (s ? " joy-ws__dot--" + s : "");
       }
 
-      function joyWsOpen(url) {
-        if (joyWsTrying) return;
-        joyWsTrying = true;
+      function connectJoy(ip) {
+        if (joyWs) { joyWs.onclose = null; joyWs.close(); joyWs = null; }
+        if (!ip) {
+          setJoyDot("");
+          joyWsStatus.textContent = "joy: 未接続";
+          return;
+        }
+        const url = "ws://" + ip + ":8700/joys";
         setJoyDot("connecting");
+        joyWsStatus.textContent = "joy: 接続中 (" + ip + ")";
         const ws = new WebSocket(url);
-        ws.onopen = function () { joyWs = ws; joyWsTrying = false; setJoyDot("ok"); };
-        ws.onclose = function () { joyWs = null; joyWsTrying = false; setJoyDot("err"); };
+        ws.onopen = function () {
+          joyWs = ws;
+          setJoyDot("ok");
+          joyWsStatus.textContent = "joy: " + ip;
+        };
+        ws.onclose = function () {
+          joyWs = null;
+          setJoyDot("err");
+          joyWsStatus.textContent = "joy: 切断 (" + ip + ")";
+        };
         ws.onerror = function () {};
       }
-
-      joyWsConnectBtn.addEventListener("click", function () {
-        if (joyWs && joyWs.readyState === WebSocket.OPEN) return;
-        const url = joyWsUrlInput.value.trim();
-        if (url) joyWsOpen(url);
-      });
-
-      joyWsDisconnectBtn.addEventListener("click", function () {
-        if (joyWs) { joyWs.onclose = null; joyWs.close(); joyWs = null; }
-        joyWsTrying = false;
-        setJoyDot("err");
-      });
 
       setInterval(function () {
         if (!joyWs || joyWs.readyState !== WebSocket.OPEN) return;
@@ -839,6 +817,13 @@
           }
           if (needVideo) renderVideo();
           showNotification(st.notification);
+
+          const unitIps = st.unit_ips || {};
+          const newIp = unitIps[st.control_operating_unit] || "";
+          if (newIp !== joyCurrentIp) {
+            joyCurrentIp = newIp;
+            connectJoy(newIp);
+          }
 
           const req = st.control_request || {};
           if (req.pending && req.unit >= 1 && req.unit <= 5) {
