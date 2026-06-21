@@ -139,15 +139,29 @@ class Publisher:
         kind = "screen" if num == 0 else "camera"
         print(f"[cam] switched to {num} ({kind})", flush=True)
 
+    def stop_pipeline(self):
+        """パイプラインを停止しカメラ/エンコーダを解放する (再接続前の後始末)。"""
+        if self.pipe is not None:
+            self.pipe.set_state(Gst.State.NULL)
+            self.pipe = None
+            self.webrtc = None
+            self.selector = None
+
+    def _trigger_reconnect(self):
+        """WSを閉じてrun()の再接続ループに制御を戻す (プロセスは終了させない)。"""
+        ws = self.ws
+        if ws is not None:
+            asyncio.run_coroutine_threadsafe(ws.close(), self.loop)
+
     def on_bus_message(self, _bus, message):
         t = message.type
         if t == Gst.MessageType.ERROR:
             err, dbg = message.parse_error()
             print(f"[gst ERROR] {err}: {dbg}", file=sys.stderr, flush=True)
-            self.loop.call_soon_threadsafe(self.loop.stop)
+            self._trigger_reconnect()
         elif t == Gst.MessageType.EOS:
             print("[gst] EOS", flush=True)
-            self.loop.call_soon_threadsafe(self.loop.stop)
+            self._trigger_reconnect()
 
     def on_negotiation_needed(self, element):
         promise = Gst.Promise.new_with_change_func(self.on_offer_created, element, None)
@@ -193,31 +207,53 @@ class Publisher:
             await self.ws.send(data)
 
 
+async def _session(loop):
+    """relayへ1回接続し、切断されるまでシグナリングを処理する。"""
+    pub = Publisher(loop)
+    try:
+        async with websockets.connect(SERVER) as ws:
+            print(f"[ws] connected to {SERVER} as id={PI_ID} (cams={sorted(SOURCES)})", flush=True)
+            pub.ws = ws
+            await ws.send(json.dumps({"type": "hello", "role": "publisher", "id": PI_ID}))
+            pub.start_pipeline()
+
+            async for raw in ws:
+                msg = json.loads(raw)
+                mtype = msg.get("type")
+                if mtype == "answer":
+                    pub.handle_answer(msg["sdp"]["sdp"])
+                elif mtype == "candidate":
+                    c = msg["candidate"]
+                    pub.handle_remote_candidate(c.get("sdpMLineIndex", 0), c["candidate"])
+                elif mtype == "camChange":
+                    pub.handle_cam_change(int(msg["cam"]))
+                elif mtype == "error":
+                    print("[signal ERROR]", msg.get("message"), file=sys.stderr, flush=True)
+    finally:
+        # 接続が切れたら必ずカメラ/エンコーダを解放してから再接続する
+        pub.stop_pipeline()
+
+
 async def run():
     loop = asyncio.get_running_loop()
-    pub = Publisher(loop)
-
     glib_loop = GLib.MainLoop()
     threading.Thread(target=glib_loop.run, daemon=True).start()
 
-    print(f"[ws] connecting to {SERVER} as id={PI_ID} (cams={sorted(SOURCES)})", flush=True)
-    async with websockets.connect(SERVER) as ws:
-        pub.ws = ws
-        await ws.send(json.dumps({"type": "hello", "role": "publisher", "id": PI_ID}))
-        pub.start_pipeline()
-
-        async for raw in ws:
-            msg = json.loads(raw)
-            mtype = msg.get("type")
-            if mtype == "answer":
-                pub.handle_answer(msg["sdp"]["sdp"])
-            elif mtype == "candidate":
-                c = msg["candidate"]
-                pub.handle_remote_candidate(c.get("sdpMLineIndex", 0), c["candidate"])
-            elif mtype == "camChange":
-                pub.handle_cam_change(int(msg["cam"]))
-            elif mtype == "error":
-                print("[signal ERROR]", msg.get("message"), file=sys.stderr, flush=True)
+    # relayが落ちる/瞬断しても止まらないよう、指数バックオフで自動再接続する
+    backoff = 1
+    while True:
+        try:
+            print(f"[ws] connecting to {SERVER} ...", flush=True)
+            await _session(loop)
+            print("[ws] disconnected", flush=True)
+            backoff = 1  # 正常にセッションが回った後の切断はすぐ再接続
+        except (OSError, websockets.exceptions.WebSocketException) as e:
+            print(f"[ws] connection failed/lost: {e}", file=sys.stderr, flush=True)
+        except Exception as e:  # 想定外でもプロセスは落とさず再接続
+            print(f"[error] unexpected: {e}", file=sys.stderr, flush=True)
+        print(f"[ws] reconnecting in {backoff}s", flush=True)
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, 10)  # 1,2,4,8,10,10...秒
 
     glib_loop.quit()
 
