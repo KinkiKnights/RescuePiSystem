@@ -743,6 +743,35 @@ async def post_unit_shutdown() -> Any:
     return await _unit_power_action("shutdown")
 
 
+@app.post("/api/units/shutdown_all")
+async def post_units_shutdown_all() -> Any:
+    """全号機（state.unit_ips の 1..5）を master-control API 経由で一斉シャットダウンする。
+
+    各号機へ _master_control_power(ip, "shutdown") を asyncio.gather で並行に呼び出し、
+    オフライン等で失敗した号機は個別にグレースフルへ倒して他号機の処理をブロックしない。
+    号機ごとの結果を {"results": {"1": {"ok": true, "message": ...}, ...}} 形式で返す。
+    """
+    async with state.lock:
+        targets = {unit: state.unit_ips.get(unit, "") for unit in sorted(state.unit_ips)}
+
+    async def _one(unit: int, ip: str) -> tuple[int, bool, str]:
+        ok, msg = await _master_control_power(ip, "shutdown")
+        return unit, ok, msg
+
+    outcomes = await asyncio.gather(*[_one(u, ip) for u, ip in targets.items()])
+    results: dict[str, Any] = {}
+    success = 0
+    for unit, ok, msg in outcomes:
+        results[str(unit)] = {"ok": ok, "message": msg}
+        if ok:
+            success += 1
+    total = len(outcomes)
+    await state.push_notification(f"全機シャットダウン: {success}/{total} 実行")
+    snap = state.snapshot()
+    await broadcast({"type": "state", "payload": snap})
+    return {"status": "ok", "results": results, "success": success, "total": total}
+
+
 @app.post("/api/notify")
 async def post_notify(body: dict[str, Any]) -> dict[str, str]:
     text = str(body.get("text", "")).strip()
