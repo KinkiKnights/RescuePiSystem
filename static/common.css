@@ -129,10 +129,21 @@ html, body {
 }
 
 .video-box__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
   font-size: 0.85rem;
   color: var(--muted);
   text-align: center;
   padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.video-box__placeholder[hidden] {
+  display: none;
 }
 
 .btn {
