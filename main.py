@@ -6,6 +6,8 @@ import asyncio
 import json
 import platform
 import time
+import urllib.error
+import urllib.request
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -664,49 +666,45 @@ async def post_ping_config(body: dict[str, Any]) -> Any:
     return {"ok": True}
 
 
-# ===== 号機の再起動 / シャットダウン（操作中の号機へ SSH して systemctl 実行） =====
-UNIT_SSH_USER = "kk"
+# ===== 号機の再起動 / シャットダウン（操作中の号機の master-control API を呼び出す） =====
+MASTER_CONTROL_PORT = 80
 
 
-async def _ssh_unit_power(ip: str, action: str) -> tuple[bool, str]:
-    """操作中の号機へ SSH し `sudo systemctl reboot|poweroff` を実行する。
+def _master_control_power_sync(ip: str, action: str) -> tuple[bool, str]:
+    """master-control の /system/reboot|shutdown へ POST する（同期・ブロッキング）。
 
-    SSH 鍵/権限が未整備の場合は BatchMode=yes によりパスワード入力へ進まず即失敗する
-    ため、実機を落とさずに (False, 理由) を返す（グレースフル）。成功時は (True, 説明)。
+    標準ライブラリ urllib で HTTP POST（空ボディ）を送る。master-control は
+    `{ok: true, message: "Rebooting..."/"Shutting down..."}` を返してから実処理する。
+    接続失敗・非2xx・タイムアウト時は (False, 理由) を返し、実機を落とさずに
+    グレースフルへ失敗する。成功時は (True, 説明)。
+    """
+    endpoint = "shutdown" if action == "shutdown" else "reboot"
+    url = f"http://{ip}:{MASTER_CONTROL_PORT}/system/{endpoint}"
+    req = urllib.request.Request(url, data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            status = resp.status
+            body = resp.read().decode(errors="replace").strip()
+    except urllib.error.HTTPError as exc:
+        return False, f"{url} が HTTP {exc.code} を返しました"
+    except urllib.error.URLError as exc:
+        return False, f"{ip} の master-control へ接続できません（{exc.reason}）"
+    except Exception as exc:
+        return False, f"master-control 呼び出しに失敗しました（{exc}）"
+    if 200 <= status < 300:
+        return True, f"{url} へ POST しました（HTTP {status}）: {body or '応答本文なし'}"
+    return False, f"{url} が HTTP {status} を返しました: {body}"
+
+
+async def _master_control_power(ip: str, action: str) -> tuple[bool, str]:
+    """操作中の号機の master-control API を叩いて reboot/shutdown を要求する。
+
+    IP 未設定時は (False, 理由) を返す（グレースフル）。HTTP 呼び出しはブロッキング
+    のため asyncio.to_thread で別スレッド実行し、イベントループを塞がない。
     """
     if not ip:
         return False, "対象号機の IP が未設定です（config.json 要確認）"
-    systemctl_cmd = "poweroff" if action == "shutdown" else "reboot"
-    cmd = [
-        "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=5",
-        f"{UNIT_SSH_USER}@{ip}", "sudo", "systemctl", systemctl_cmd,
-    ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
-    except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        return False, f"{ip} への SSH がタイムアウトしました"
-    except FileNotFoundError:
-        return False, "ssh コマンドが見つかりません（サーバー環境要確認）"
-    except Exception as exc:
-        return False, f"SSH 実行に失敗しました（{exc}）"
-    if proc.returncode == 0:
-        return True, f"{ip} へ systemctl {systemctl_cmd} を実行しました"
-    detail = (
-        err.decode(errors="replace").strip()
-        or out.decode(errors="replace").strip()
-        or f"rc={proc.returncode}"
-    )
-    return False, f"{ip} での実行に失敗しました: {detail}"
+    return await asyncio.to_thread(_master_control_power_sync, ip, action)
 
 
 async def _unit_power_action(action: str) -> Any:
@@ -714,7 +712,7 @@ async def _unit_power_action(action: str) -> Any:
     async with state.lock:
         unit = state.control_operating_unit
         ip = state.unit_ips.get(unit, "")
-    ok, msg = await _ssh_unit_power(ip, action)
+    ok, msg = await _master_control_power(ip, action)
     label = "シャットダウン" if action == "shutdown" else "再起動"
     if ok:
         await state.push_notification(f"{unit}号機 {label}を実行しました")
@@ -729,13 +727,13 @@ async def _unit_power_action(action: str) -> Any:
 
 @app.post("/api/unit/reboot")
 async def post_unit_reboot() -> Any:
-    """操作中の号機（control_operating_unit）を SSH 経由で再起動する。"""
+    """操作中の号機（control_operating_unit）を master-control API 経由で再起動する。"""
     return await _unit_power_action("reboot")
 
 
 @app.post("/api/unit/shutdown")
 async def post_unit_shutdown() -> Any:
-    """操作中の号機（control_operating_unit）を SSH 経由でシャットダウンする。"""
+    """操作中の号機（control_operating_unit）を master-control API 経由でシャットダウンする。"""
     return await _unit_power_action("shutdown")
 
 

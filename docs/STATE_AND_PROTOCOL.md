@@ -119,8 +119,8 @@ ws://<host>:8765/ws/<role>
 | `POST /api/notify` | `{text}` | 通知を送信 |
 | `POST /api/analysis` | `analysis` の各キー | 旧・全体解析データを更新 |
 | `POST /api/master` | `{action, ...}` | マスター操作（下表） |
-| `POST /api/unit/reboot` | — | **操作中の号機**（`control_operating_unit` の `unit_ip`）へ SSH（`ssh -o BatchMode=yes … kk@<ip> sudo systemctl reboot`）して再起動。SSH 鍵/権限が未整備なら BatchMode で即失敗し、サーバーは落とさず HTTP 502＋理由メッセージを返す（グレースフル）。成功時は `{status:"ok", unit, message}` |
-| `POST /api/unit/shutdown` | — | 同上で `sudo systemctl poweroff`（シャットダウン）。失敗時 502＋理由。コントロールモードの「シャットダウン」ボタンから確認ダイアログ経由で呼ぶ |
+| `POST /api/unit/reboot` | — | **操作中の号機**（`control_operating_unit` の `unit_ip`）の master-control API（`POST http://<ip>:80/system/reboot`、空ボディ・標準ライブラリ urllib で送信）を呼んで再起動。IP 未設定/接続失敗/非2xx なら、サーバーは落とさず HTTP 502＋理由メッセージを返す（グレースフル）。成功時は `{status:"ok", unit, message}` |
+| `POST /api/unit/shutdown` | — | 同上で master-control API（`POST http://<ip>:80/system/shutdown`）を呼んでシャットダウン。失敗時 502＋理由。コントロールモードの「シャットダウン」ボタンから確認ダイアログ経由で呼ぶ |
 
 ### `POST /api/master` の `action`
 
