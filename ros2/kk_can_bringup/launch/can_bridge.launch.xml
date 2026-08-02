@@ -1,0 +1,7 @@
+<launch>
+  <arg name="interface" default="can0"/>
+  <include file="$(find-pkg-share ros2_socketcan)/launch/socket_can_bridge.launch.xml">
+    <arg name="interface" value="$(var interface)"/>
+    <arg name="enable_can_fd" value="false"/>
+  </include>
+</launch>

@@ -20,8 +20,11 @@
 #    - camera_publisher/   : USB カメラ → WebRTC 配信 (relay へ)
 #    - mic_publisher/      : USB マイク → FLAC ロスレス TCP 配信
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
+#    - ros2/kk_can_bringup/: MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
 #  外部 OSS は setup/kk_rescue26_pi.repos で参照(vcs import):
 #    - ros2_socketcan      : CAN 通信 (上流 OSS)
+#  CAN(MCP2515 HAT)のシステム側 bring-up は setup/can_setup.sh が担当
+#  (HAT 装着機のみ。SETUP_CAN=1 で app_setup.sh から実行、または単体実行)。
 #
 #  ※ webrtc の中継(SFU=relay)サーバとビューアは「別マシン」で動かします
 #    (ClaudeShareContents/webrtc-camera の relay/web を参照)。relay は
@@ -62,6 +65,10 @@ export MIC_PORT="${MIC_PORT:-5005}"             # 配信TCPポート
 export USER_NAME="$(id -un)"
 # USB WiFi ドングルドライバ (RTL8811AU) は既定で無効(詳細は env_setup.sh / docs)。
 export SETUP_WIFI_DONGLE="${SETUP_WIFI_DONGLE:-0}"
+# CAN (MCP2515 SPI HAT) の bring-up。HAT を装着した号機のみ 1(詳細は setup/can_setup.sh)。
+export SETUP_CAN="${SETUP_CAN:-0}"
+# ROS 2 ドメイン ID。号機内の全 ROS ノードで揃える(既定 0)。CAN ブリッジもこれを使う。
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 # Git ユーザー識別情報(commit 用。未設定なら以下を --global に設定する)。
 export GIT_USER_NAME="${GIT_USER_NAME:-sanjo}"
 export GIT_USER_EMAIL="${GIT_USER_EMAIL:-sanjo@kinkiknights.com}"

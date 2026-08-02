@@ -91,11 +91,13 @@ kk_rescue26_pi/
 ├── camera_publisher/    # USB カメラ → WebRTC 配信 (外部 relay へ)
 ├── mic_publisher/       # USB マイク → FLAC ロスレス TCP 配信 (:5005)
 ├── ros2/
-│   └── joy_node_web/    # [submodule] Web ゲームパッド → sensor_msgs/Joy (colcon 対象, :8700/joy)
+│   ├── joy_node_web/    # [submodule] Web ゲームパッド → sensor_msgs/Joy (colcon 対象, :8700/joy)
+│   └── kk_can_bringup/  # MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
 └── setup/
     ├── kk_robot_setup.sh      # オーケストレーター (環境変数定義 / SSH キー登録待ち / 実行メニュー)
     ├── env_setup.sh           # 基本設定 (sudo/swap/WiFi) と ROS 2 の導入
     ├── app_setup.sh           # kk_rescue26_pi の環境構築 (依存/clone/build/systemd 生成)
+    ├── can_setup.sh           # CAN (MCP2515 HAT) のシステム側 bring-up (SETUP_CAN=1 で有効)
     ├── update.sh              # kk_rescue26_pi を最新に更新して再ビルド
     └── kk_rescue26_pi.repos   # 外部依存 (ros2_socketcan) の vcstool 定義
 
@@ -172,3 +174,63 @@ cd ~/kk_ws && colcon build
 - `master_control/programs.json` はセットアップスクリプトが Pi ごとに生成する運用ファイルです。
   リポジトリには KK05 の実例をコミットしてあります。
 - サービス操作: `sudo systemctl restart master-control.service` / `journalctl -u master-control -f`
+
+## CAN (MCP2515 SPI HAT) 接続
+
+モータ/サーボ等を CAN で制御する号機向けに、MCP2515 CAN HAT の SocketCAN と
+[ros2_socketcan](https://github.com/autowarefoundation/ros2_socketcan) ブリッジを構成します。
+**この設定は既定で無効**で、**MCP2515 HAT を物理的に装着した号機でのみ**有効化します
+(HAT が無いと `can0` が出ず、`can0-setup.service` が待機後に失敗します)。
+
+- **ROS パッケージ** `ros2/kk_can_bringup`(colcon 対象)が ros2_socketcan の
+  `socket_can_bridge.launch.xml`(`enable_can_fd=false`)を include します。
+  `ros2_socketcan` 本体は `setup/kk_rescue26_pi.repos` 経由で取得・ビルドされます
+  (取り込まず上流参照)。
+- **システム側 bring-up** は `setup/can_setup.sh` が担当:Device Tree overlay の追記、
+  `/etc/default/kk-can` の生成、`/usr/local/sbin/can0-up.sh`(SocketCAN link up)と
+  `/usr/local/sbin/kk-can-ros-launch.sh`(ブリッジ起動)の設置、systemd ユニット
+  (`can0-setup.service` → `kk-can-ros.service`)の生成・有効化を行います(冪等)。
+
+### 有効化のしかた
+
+新規セットアップのワンライナー先頭に `SETUP_CAN=1` を付けると、`app_setup.sh` の
+colcon ビルド後に `can_setup.sh` が実行されます:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/kk_rescue26_pi/main/setup/kk_robot_setup.sh | SETUP_CAN=1 bash
+```
+
+既にセットアップ済みの号機に後から追加する場合は単体実行できます
+(`app_setup.sh` の colcon ビルドが済んでいる前提):
+
+```bash
+SETUP_CAN=1 ./setup/can_setup.sh
+```
+
+**Device Tree overlay の反映には一度再起動が必要**です。再起動後は
+`can0-setup.service` / `kk-can-ros.service` が自動起動します。
+
+### パラメータ(既定値・環境変数で上書き可)
+
+| 変数 | 既定 | 説明 |
+|------|------|------|
+| `CAN_BITRATE` | `1000000` | CAN ビットレート(1 Mbit/s) |
+| `CAN_OSCILLATOR_HZ` | `16000000` | MCP2515 水晶振動子 (Hz) |
+| `CAN_INTERRUPT_GPIO` | `24` | MCP2515 INT ピン (BCM) |
+| `DT_OVERLAY` | `mcp2515-can0` | Device Tree overlay 名 |
+| `ROS_DOMAIN_ID` | `0` | ROS 2 ドメイン ID。**号機内の全 ROS ノードで揃える**こと |
+
+`ROS_DOMAIN_ID` は号機ごとに固有ではなく、**その号機の他 ROS ノード(joy_node_web 等)と
+同じ値**にする必要があります(異なると CAN トピックを相互に読めません)。既定は 0
+(kk_rescue26_pi の他ノードの既定と一致)。号機で ROS グラフを分離している場合のみ、
+セットアップ時に上書きします(例:`ROS_DOMAIN_ID=5 SETUP_CAN=1 ./setup/can_setup.sh`)。
+上書き後は `/etc/default/kk-can` に保存され、両サービスがこれを参照します。
+
+### 動作確認
+
+```bash
+ip link show can0                                  # <UP> と bitrate を確認
+systemctl status can0-setup kk-can-ros
+ros2 topic list                                    # /from_can_bus /to_can_bus
+candump can0                                        # フレーム受信を確認 (can-utils)
+```

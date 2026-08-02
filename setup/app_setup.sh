@@ -43,6 +43,10 @@ set -euo pipefail
 : "${MIC_RATE:=48000}"        # 48000 または 44100 (マイクのネイティブ)
 : "${MIC_PORT:=5005}"         # 配信TCPポート
 : "${USER_NAME:=$(id -un)}"
+# CAN (MCP2515 SPI HAT) bring-up。HAT を装着した号機のみ 1(既定は無効)。
+: "${SETUP_CAN:=0}"
+# ROS 2 ドメイン ID。号機内の全 ROS ノードで揃える(既定 0)。CAN ブリッジもこれを使う。
+: "${ROS_DOMAIN_ID:=0}"
 
 log() { printf '\033[1;36m[app-setup]\033[0m %s\n' "$*"; }
 
@@ -93,7 +97,8 @@ chmod +x "${REPO_DIR}/camera_publisher/"*.sh "${REPO_DIR}/mic_publisher/"*.sh
 # =============================================================================
 # 3. rosdep 依存解決 と colcon ビルド
 #    colcon は package.xml を持つパッケージのみビルド:
-#      kk_rescue26_pi/ros2/joy_node_web / ros2_socketcan / ros2_socketcan_msgs
+#      kk_rescue26_pi/ros2/joy_node_web / kk_rescue26_pi/ros2/kk_can_bringup
+#      / ros2_socketcan / ros2_socketcan_msgs
 #    (master_control / camera_publisher / mic_publisher は ROS パッケージではない)
 #    rosdep が ros2_socketcan の依存 (ros-jazzy-can-msgs 等) を自動導入します。
 #    ※ rosdep の初期化・更新 (rosdep init / update) は env_setup.sh で実施済み。
@@ -105,6 +110,21 @@ set +u; source "/opt/ros/${ROS_DISTRO}/setup.bash"; set -u
 cd "${WS}"
 rosdep install --from-paths src --ignore-src -r -y || log "   (rosdep 一部スキップ)"
 colcon build --symlink-install
+
+# =============================================================================
+# 3.5 CAN (MCP2515 HAT) のシステム側 bring-up — 既定で無効(HAT 装着機のみ)
+#    ROS パッケージ (kk_can_bringup / ros2_socketcan) は上の colcon build で
+#    ビルド済み。ここでは overlay / /etc/default/kk-can / systemd 等のシステム側を
+#    can_setup.sh で構成する。HAT 未装着機で有効化するとサービスが失敗するため既定無効。
+#    有効化: SETUP_CAN=1 を付けて実行。
+# =============================================================================
+CAN_SETUP="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/can_setup.sh"
+if [ "${SETUP_CAN}" = "1" ]; then
+  log "3.5. CAN bring-up (SETUP_CAN=1)"
+  bash "${CAN_SETUP}"
+else
+  log "3.5. CAN bring-up は既定で無効 (MCP2515 HAT 装着機は SETUP_CAN=1 を付けて実行)"
+fi
 
 # =============================================================================
 # 4. master control: カメラ/joy_node_web/mic を登録 + 自動起動(systemd)
