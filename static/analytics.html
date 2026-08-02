@@ -37,6 +37,7 @@
       padding: 4px;
     }
     .view {
+      position: relative;
       display: flex;
       min-width: 0;
       min-height: 0;
@@ -44,6 +45,31 @@
     }
     .view .video-box { flex: 1; }
     .stage .video-box video { object-fit: contain; }
+
+    /* ---- 各監視映像の QR 検出タグ（映像左下・常時表示） ---- */
+    .qr-tag {
+      position: absolute;
+      left: 6px;
+      bottom: 6px;
+      z-index: 3;
+      max-width: calc(100% - 12px);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 9px;
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .qr-tag.is-detected {
+      color: #ffffff;
+      background: rgba(47, 143, 70, 0.85);
+      border-color: #2f8f46;
+    }
     .view--ten { grid-area: r1; }
     .view--target { grid-area: r2; }
     .view--audio {
@@ -620,18 +646,56 @@
         pushRoom({ qr: cur().qr, injuryDone: cur().injuryDone });
       });
 
-      /* メイン映像（中央の大きいビュー）をリアルタイムQR解析 */
-      function mainStageVideo() {
-        const sel = stage.dataset.sel;
-        if (sel === "ten") return viewTen.querySelector("video");
-        if (sel === "target") return viewTarget.querySelector("video");
-        return null; // 音声解析タブには映像なし
+      /* ---- 監視映像ごとのリアルタイムQR解析 ----
+         可視の各ロボット映像（天カメ＝1号機・対象機＝選択号機）を一定間隔で
+         サンプリングし QR をデコードする。結果は各映像左下の「QRタグ」に常時
+         表示（検出＝緑／未検出＝淡色）。中央メインに選ばれている映像の検出値は、
+         従来どおり選択中ルームの「負傷（QR）」欄へ流し込み、［結果確定］で共有
+         状態へ送る（control モードと同一運用）。QR ライブラリは同梱の
+         static/jsqr.js（createQrScanner が使用）でオフライン動作。 */
+      const QR_HOLD_MS = 1600; // この時間内に再検出が無ければ「未検出」表示へ戻す
+      const qrFeeds = {
+        ten: { key: "ten", view: viewTen, text: "", at: 0 },
+        target: { key: "target", view: viewTarget, text: "", at: 0 },
+      };
+      function ensureQrTag(viewEl) {
+        let tag = viewEl.querySelector(".qr-tag");
+        if (!tag) {
+          tag = document.createElement("span");
+          tag.className = "qr-tag";
+          viewEl.appendChild(tag);
+        }
+        return tag;
       }
-      RC.createQrScanner(mainStageVideo, function (text) {
-        cur().qr = text;
-        qrDetectedAt[activeRoom] = Date.now();
-        renderInjury();
-      }, 700);
+      function renderQrTag(feed) {
+        const tag = ensureQrTag(feed.view);
+        const detected = feed.text && Date.now() - feed.at < QR_HOLD_MS;
+        tag.textContent = detected ? "QR: " + feed.text : "QR: 未検出";
+        tag.classList.toggle("is-detected", !!detected);
+      }
+      Object.keys(qrFeeds).forEach(function (key) {
+        const feed = qrFeeds[key];
+        RC.createQrScanner(
+          function () { return feed.view.querySelector("video"); },
+          function (text) {
+            feed.text = text;
+            feed.at = Date.now();
+            renderQrTag(feed);
+            // 中央メインに選択中の映像なら、選択中ルームの負傷（QR）へ反映
+            if (stage.dataset.sel === feed.key) {
+              cur().qr = text;
+              qrDetectedAt[activeRoom] = feed.at;
+              renderInjury();
+            }
+          },
+          700
+        );
+        renderQrTag(feed); // 初期表示（未検出）
+      });
+      // 検出が途切れたら各タグを「未検出」へ戻す（定期更新）
+      setInterval(function () {
+        Object.keys(qrFeeds).forEach(function (key) { renderQrTag(qrFeeds[key]); });
+      }, 500);
       colorConfirm.addEventListener("click", function () {
         cur().colorDone = !cur().colorDone;
         renderColor();
