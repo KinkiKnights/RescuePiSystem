@@ -28,6 +28,7 @@
 | `unit_ips` | `{"1".."5": str}` | 号機ごとの固定 IP（`config.json` 由来・読み取り専用）。control が joy 接続に使用。「6. 号機 IP」節参照 |
 | `dark_room_coord` | `{x, y}` または `null` | 暗室座標（エンジニアがマップ上をクリックして指定・全モード共有）。`null` = 未設定。`x`,`y` はマップ表面に対する **0〜1 正規化座標**（画面サイズ・モード非依存）。単一座標のみ保持し、新規指定で上書き。表示は 1800mm 換算（後述）。「7. 暗室座標」節参照 |
 | `field_side` | `"red"` / `"blue"` / `null` | フィールド陣営（マスターが選択・全モード共有）。`null` = 未選択。マップ上の「入口」描画位置を決める（赤＝右辺下半分／青＝左辺下半分）。「7. 暗室座標」節参照 |
+| `dark_room_offset` | `{"red":{x,y}, "blue":{x,y}}` | 暗室座標オフセット（原点校正・マスターが field_side ごとに設定・全モード共有）。正規化暗室座標→map[m] 変換時に加算する。符号規約は **下向き +・右向き −**（単位 map[m] 想定・要確認）。`x`=下方向オフセット（下+）、`y`=右方向オフセット（右−）。既定は全 0。「9. 5号機 自動走行」節参照 |
 | `unit5_auto_run` | `"off"` / `"armed"` / `"lit"` | 5号機 自動走行ボタンの状態（サーバー権威・全モード共有）。`off`=消灯（既定）／`armed`=点滅（暗室座標が入力/変更された）／`lit`=点灯（自動走行中）。「9. 5号機 自動走行」節参照 |
 
 ### `units[n]`
@@ -36,7 +37,7 @@
 |---|---|---|
 | `unit` | int | 号機番号 |
 | `delay_ms` | int | 通信遅延（ダミー値） |
-| `connected` | bool | 接続状態 |
+| `connected` | bool | 接続状態。サーバーが号機 IP（`config.json`）を数秒周期で実 ping し実測で更新する（`_units_ping_loop`）。`_default_units` の初期値（2号機のみ false）は起動直後のみで、以後は実 ping が権威。**手動 `disabled` 中の号機は ping で上書きしない**（`disable_unit` が設定した値を保持） |
 | `method` | `"WiFi"`/`"TPIP"` | 通信方式 |
 | `disabled` | bool | 行動不能フラグ |
 | `other_op` | bool | 別オペレーターが操縦中（ダミー） |
@@ -93,6 +94,7 @@ ws://<host>:8765/ws/<role>
 | `complete_task` | `task_id` | 該当タスクを完了に |
 | `set_dark_room_coord` | `coord` | 暗室座標を設定／解除（全モード共有）。`coord` が `{x, y}`（ともに 0〜1 の実数）なら設定、`null` なら解除。範囲外・型不正なペイロードは無視（state 不変）。主にエンジニアモードから送信 |
 | `set_field_side` | `side` | フィールド陣営を設定／解除（全モード共有）。`side` が `"red"`/`"blue"` なら設定、`null` なら未選択に解除。それ以外の値は無視（state 不変）。主にマスターモードから送信 |
+| `set_dark_room_offset` | `side`, （`x`/`y`） | 暗室座標オフセットを field_side ごとに設定（全モード共有）。`side` は `"red"`/`"blue"`。`x`=下方向（下+）、`y`=右方向（右−）を map[m] 想定の実数で。送られたキーのみ更新、数値化不能な値は無視。主にマスターモードから送信。「9. 5号機 自動走行」節参照 |
 | `unit5_auto_run_toggle` | — | 5号機自動走行ボタンのトグル。`armed`→`lit`（5号機へ `set_goal` 送信・走行開始）、`lit`→`off`（`cancel_goal` 送信・キャンセル）。`off` のときは無視。主にコントロールモードから送信。「9. 5号機 自動走行」節参照 |
 | `reporter_cue` | `room`, `text` | 報告キュー由来の通知（`[ルームX] text`） |
 
@@ -117,6 +119,8 @@ ws://<host>:8765/ws/<role>
 | `POST /api/notify` | `{text}` | 通知を送信 |
 | `POST /api/analysis` | `analysis` の各キー | 旧・全体解析データを更新 |
 | `POST /api/master` | `{action, ...}` | マスター操作（下表） |
+| `POST /api/unit/reboot` | — | **操作中の号機**（`control_operating_unit` の `unit_ip`）へ SSH（`ssh -o BatchMode=yes … kk@<ip> sudo systemctl reboot`）して再起動。SSH 鍵/権限が未整備なら BatchMode で即失敗し、サーバーは落とさず HTTP 502＋理由メッセージを返す（グレースフル）。成功時は `{status:"ok", unit, message}` |
+| `POST /api/unit/shutdown` | — | 同上で `sudo systemctl poweroff`（シャットダウン）。失敗時 502＋理由。コントロールモードの「シャットダウン」ボタンから確認ダイアログ経由で呼ぶ |
 
 ### `POST /api/master` の `action`
 
@@ -249,13 +253,19 @@ ws://<host>:8765/ws/<role>
 状態はサーバー権威の `unit5_auto_run`（`"off"`/`"armed"`/`"lit"`）で全モードへ共有され、
 **操作中の号機に依存せず常に表示**される。
 
+> なおコントロールモードの「操作」セクションは **「5号機自動走行」「再起動」「シャットダウン」**の
+> 3 ボタン構成（旧: 現場到着/搬送開始/通信経路切替/カメラ再起動 は削除）。再起動/シャットダウンは
+> 操作中の号機へ `POST /api/unit/reboot|shutdown`（確認ダイアログ付き・「3. REST API」参照）。
+> 報告者モード（reporter.html）は タップで報告済み（緑）・ルームタイトルの橙/緑で完了表示・
+> QR とストーブを同一行に統合し、暗室座標表示と送話 UI は廃止した。
+
 ### 9.1 状態遷移
 
 | 現状態 | 契機 | 次状態 | ロボットへの送信 |
 |---|---|---|---|
 | `off` | 既定 | `off` | — |
 | いずれか | エンジニアが暗室座標を**新規設定/変更**（`set_dark_room_coord` の `coord` が新値） | `armed`（点滅） | 走行中(lit)だった場合のみ旧ゴールを `cancel_goal` |
-| `armed` | ボタンクリック（`unit5_auto_run_toggle`） | `lit`（点灯） | `set_goal`（暗室座標→フィールド座標[m]） |
+| `armed` | ボタンクリック（`unit5_auto_run_toggle`） | `lit`（点灯） | `set_goal`（暗室座標→フィールド座標[m]。選択中 field_side の `dark_room_offset` で原点校正） |
 | `lit` | ボタンをもう一度クリック | `off`（消灯） | `cancel_goal` |
 | `armed`/`lit` | 暗室座標が**クリア**（`coord: null`） | `off` | 走行中(lit)だった場合のみ `cancel_goal` |
 | `off` | ボタンクリック | `off`（無視） | — |
@@ -287,8 +297,21 @@ ws://<host>:8765/ws/<role>
 暗室座標は 1800×1800mm フィールドの 0..1 正規化（`nx`=右方向・`ny`=下方向、左上=(0,0)）。
 COMMUNICATION_SPEC.md「4. 座標系」に従い `main.py` の `_dark_room_goal()` が換算する。
 
-- **青フィールド**（原点=左上, X=下向き正, Y=右向き正）: `x = ny*1.8`, `y = nx*1.8`
-- **赤フィールド**（原点=右上, X=下向き正, Y=左向き正）: `x = ny*1.8`, `y = (1-nx)*1.8`
+- **青フィールド**（原点=左上, X=下向き正, Y=右向き正）: `x = ny*1.8 + ox`, `y = nx*1.8 - oy`
+- **赤フィールド**（原点=右上, X=下向き正, Y=左向き正）: `x = ny*1.8 + ox`, `y = (1-nx)*1.8 - oy`
 - `yaw` は暗室座標に向き情報が無いため `0.0` 固定（**要確認**）。
 - `field_side` 未選択時は青（左上原点）規約で暫定換算する（**要確認**：`map` フレームの基準は
   運用側で確定のこと）。
+
+#### 原点校正オフセット（`dark_room_offset`）
+
+マスターモードで **field_side ごと**にオフセット `{x, y}`（単位 map[m] 想定）を設定でき、
+`set_goal` の座標を校正する。符号規約は **下向き +・右向き −**（ユーザー指定）:
+
+- `ox = dark_room_offset[side].x`（下方向・下+）を goal の下方向成分へ **加算**。
+- `oy = dark_room_offset[side].y`（右方向・右−）を goal の右方向成分から **減算**
+  （正値=左へ / 負値=右へずらす）。
+- `side` は選択中 `field_side`（未選択時は `blue` のオフセット）。既定は全 0（無校正）。
+- **要確認**: 単位は map フレーム[m]を想定（正規化値ではない）。赤フィールドは内部 y 軸が
+  `(1-nx)`（左向き正）のため、右方向オフセットの物理的向きは要確認（暫定で青と同じく減算）。
+- `dark_room_offset` は原点校正（フィールド固有の設定値）のため `reset` では消去しない。

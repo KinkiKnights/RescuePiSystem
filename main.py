@@ -54,7 +54,11 @@ ROBOT_WS_PORT = 8700
 ROBOT_WS_PATH = "joys"
 
 
-def _dark_room_goal(coord: dict[str, float], field_side: str | None) -> dict[str, Any]:
+def _dark_room_goal(
+    coord: dict[str, float],
+    field_side: str | None,
+    offset: dict[str, float] | None = None,
+) -> dict[str, Any]:
     """正規化暗室座標(0..1) を joy_node_web の set_goal 用フィールド座標[m]へ変換する。
 
     COMMUNICATION_SPEC.md「4. 座標系」より:
@@ -62,14 +66,30 @@ def _dark_room_goal(coord: dict[str, float], field_side: str | None) -> dict[str
       - 赤フィールド: 原点=右上, X=下向き正, Y=左向き正 → x = ny*1.8, y = (1-nx)*1.8
     暗室座標には向き情報が無いため yaw=0.0（要確認）。field_side 未選択時は
     青(左上原点)の規約で暫定変換する（運用側で map フレーム基準を確定すること）。
+
+    原点校正用オフセット（マスターが field_side ごとに設定・単位は map[m] 想定）を
+    加算する。符号規約はユーザー指定の「下向き +・右向き −」:
+      - offset["x"] = 下方向オフセット（下が +）→ goal x（下方向正）へ **加算**。
+      - offset["y"] = 右方向オフセット（右が −）→ goal y（右方向）へ **減算**。
+        すなわち正値=左へ / 負値=右へずらす。
+    ※ 赤フィールドは内部 y 軸が (1-nx) で左向き正のため、右方向オフセットの向きは
+      要確認（暫定で青と同じく減算＝左寄せとして扱う）。
     """
     nx = float(coord["x"])
     ny = float(coord["y"])
-    gx = ny * FIELD_SIZE_M
+    ox = 0.0
+    oy = 0.0
+    if isinstance(offset, dict):
+        try:
+            ox = float(offset.get("x", 0.0))
+            oy = float(offset.get("y", 0.0))
+        except (TypeError, ValueError):
+            ox = oy = 0.0
+    gx = ny * FIELD_SIZE_M + ox  # 下向き +
     if field_side == "red":
-        gy = (1.0 - nx) * FIELD_SIZE_M
+        gy = (1.0 - nx) * FIELD_SIZE_M - oy  # 右向き −
     else:
-        gy = nx * FIELD_SIZE_M
+        gy = nx * FIELD_SIZE_M - oy  # 右向き −（青／未選択）
     return {"x": round(gx, 4), "y": round(gy, 4), "yaw": 0.0, "frame_id": "map"}
 
 
@@ -309,6 +329,46 @@ async def _ping_loop() -> None:
         await asyncio.sleep(max(1.0, interval))
 
 
+# ===== 号機 接続状況の実 Ping 監視（units[n].connected を実測で更新） =====
+UNITS_PING_INTERVAL_SEC = 5.0
+UNITS_PING_TIMEOUT_SEC = 1.0
+
+
+async def _ping_or_false(ip: str, timeout_sec: float) -> bool:
+    """IP が空なら False、そうでなければ _ping_once の結果を返す。"""
+    if not ip:
+        return False
+    return await _ping_once(ip, timeout_sec)
+
+
+async def _units_ping_loop() -> None:
+    """各号機IP(config.json 由来)を定期 ping し、units[n].connected を実測で更新・配信する。
+
+    - 手動 disabled 中の号機は ping で上書きしない（disabled と connected の意味を保つ）。
+    - connected に変化があったときのみ全クライアントへ state を配信する（無駄な再送を避ける）。
+    - _default_units の connected(i!=2) は初期値のみで、起動後は実 ping が権威となる。
+    """
+    while True:
+        targets = [(n, UNIT_IPS.get(n, "")) for n in range(1, 6)]
+        results = await asyncio.gather(
+            *[_ping_or_false(ip, UNITS_PING_TIMEOUT_SEC) for _, ip in targets]
+        )
+        changed = False
+        async with state.lock:
+            for (n, _ip), ok in zip(targets, results):
+                u = state.units.get(n)
+                if u is None or u.get("disabled"):
+                    continue
+                online = bool(ok)
+                if u.get("connected") != online:
+                    u["connected"] = online
+                    changed = True
+        if changed:
+            snap = state.snapshot()
+            await broadcast({"type": "state", "payload": snap})
+        await asyncio.sleep(UNITS_PING_INTERVAL_SEC)
+
+
 def _default_tasks() -> list[dict[str, Any]]:
     tasks: list[dict[str, Any]] = [
         {"id": 1, "text": "ブレーカー", "room": None, "done": False},
@@ -413,6 +473,13 @@ class AppState:
         # フィールド陣営（マスターが選択・全モードで共有）。
         # None=未選択、"red"=赤フィールド（入口＝右辺下半分）、"blue"=青フィールド（入口＝左辺下半分）。
         self.field_side: str | None = None
+        # 暗室座標オフセット（マスターが field_side ごとに設定・全モード共有）。
+        # 正規化暗室座標→map[m] 変換時の原点校正。符号規約: 下向き +・右向き −（単位 map[m] 想定）。
+        # {"red": {"x": 下方向, "y": 右方向}, "blue": {...}}。既定は全 0（無校正）。
+        self.dark_room_offset: dict[str, dict[str, float]] = {
+            "red": {"x": 0.0, "y": 0.0},
+            "blue": {"x": 0.0, "y": 0.0},
+        }
         # 5号機 自動走行の状態（サーバー権威・全モード共有）。
         # "off"=消灯（既定）/ "armed"=点滅（暗室座標が入力/変更された）/ "lit"=点灯（自動走行中）。
         self.unit5_auto_run: str = "off"
@@ -438,6 +505,9 @@ class AppState:
                 dict(self.dark_room_coord) if self.dark_room_coord else None
             ),
             "field_side": self.field_side,
+            "dark_room_offset": {
+                side: dict(v) for side, v in self.dark_room_offset.items()
+            },
             "unit5_auto_run": self.unit5_auto_run,
         }
 
@@ -478,6 +548,7 @@ class AppState:
         # 5号機 自動走行もランタイム状態のためリセットで消灯へ戻す
         self.unit5_auto_run = "off"
         # 号機 IP は固定設定のためリセットしない（config.json の値を維持）
+        # 暗室座標オフセットは原点校正（フィールド固有の設定値）のためリセットで消さない
 
 
 state = AppState()
@@ -556,6 +627,8 @@ async def ping_monitor_page() -> FileResponse:
 async def _start_ping_monitor() -> None:
     # ping 監視のバックグラウンドタスクを起動する。
     asyncio.create_task(_ping_loop())
+    # 号機 接続状況（units[n].connected）を実 ping で更新するタスクも起動する。
+    asyncio.create_task(_units_ping_loop())
 
 
 @app.get("/api/state")
@@ -589,6 +662,81 @@ async def post_ping_config(body: dict[str, Any]) -> Any:
     except OSError as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)})
     return {"ok": True}
+
+
+# ===== 号機の再起動 / シャットダウン（操作中の号機へ SSH して systemctl 実行） =====
+UNIT_SSH_USER = "kk"
+
+
+async def _ssh_unit_power(ip: str, action: str) -> tuple[bool, str]:
+    """操作中の号機へ SSH し `sudo systemctl reboot|poweroff` を実行する。
+
+    SSH 鍵/権限が未整備の場合は BatchMode=yes によりパスワード入力へ進まず即失敗する
+    ため、実機を落とさずに (False, 理由) を返す（グレースフル）。成功時は (True, 説明)。
+    """
+    if not ip:
+        return False, "対象号機の IP が未設定です（config.json 要確認）"
+    systemctl_cmd = "poweroff" if action == "shutdown" else "reboot"
+    cmd = [
+        "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=5",
+        f"{UNIT_SSH_USER}@{ip}", "sudo", "systemctl", systemctl_cmd,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        return False, f"{ip} への SSH がタイムアウトしました"
+    except FileNotFoundError:
+        return False, "ssh コマンドが見つかりません（サーバー環境要確認）"
+    except Exception as exc:
+        return False, f"SSH 実行に失敗しました（{exc}）"
+    if proc.returncode == 0:
+        return True, f"{ip} へ systemctl {systemctl_cmd} を実行しました"
+    detail = (
+        err.decode(errors="replace").strip()
+        or out.decode(errors="replace").strip()
+        or f"rc={proc.returncode}"
+    )
+    return False, f"{ip} での実行に失敗しました: {detail}"
+
+
+async def _unit_power_action(action: str) -> Any:
+    """control_operating_unit の号機へ reboot/shutdown を試み、結果を JSON で返す。"""
+    async with state.lock:
+        unit = state.control_operating_unit
+        ip = state.unit_ips.get(unit, "")
+    ok, msg = await _ssh_unit_power(ip, action)
+    label = "シャットダウン" if action == "shutdown" else "再起動"
+    if ok:
+        await state.push_notification(f"{unit}号機 {label}を実行しました")
+        snap = state.snapshot()
+        await broadcast({"type": "state", "payload": snap})
+        return {"status": "ok", "unit": unit, "message": msg}
+    return JSONResponse(
+        status_code=502,
+        content={"status": "error", "unit": unit, "message": f"{label}に失敗: {msg}"},
+    )
+
+
+@app.post("/api/unit/reboot")
+async def post_unit_reboot() -> Any:
+    """操作中の号機（control_operating_unit）を SSH 経由で再起動する。"""
+    return await _unit_power_action("reboot")
+
+
+@app.post("/api/unit/shutdown")
+async def post_unit_shutdown() -> Any:
+    """操作中の号機（control_operating_unit）を SSH 経由でシャットダウンする。"""
+    return await _unit_power_action("shutdown")
 
 
 @app.post("/api/notify")
@@ -847,6 +995,29 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
                     state.field_side = side
                     changed = True
 
+    elif msg_type == "set_dark_room_offset":
+        # 暗室座標オフセットを field_side ごとに設定（マスターから送信・全モード共有）。
+        # {side:"red"|"blue", x:下方向(下+), y:右方向(右−)}。x/y は map[m] 想定の実数。
+        side = msg.get("side")
+        async with state.lock:
+            if side in ("red", "blue"):
+                cur = state.dark_room_offset.get(side, {"x": 0.0, "y": 0.0})
+                new_x = cur.get("x", 0.0)
+                new_y = cur.get("y", 0.0)
+                if "x" in msg:
+                    try:
+                        new_x = float(msg["x"])
+                    except (TypeError, ValueError):
+                        new_x = cur.get("x", 0.0)
+                if "y" in msg:
+                    try:
+                        new_y = float(msg["y"])
+                    except (TypeError, ValueError):
+                        new_y = cur.get("y", 0.0)
+                if new_x != cur.get("x") or new_y != cur.get("y"):
+                    state.dark_room_offset[side] = {"x": new_x, "y": new_y}
+                    changed = True
+
     elif msg_type == "unit5_auto_run_toggle":
         # 5号機自動走行ボタンのトグル。
         #   armed(点滅) → lit(点灯): 暗室座標を目標に set_goal を送信し走行開始。
@@ -858,8 +1029,12 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
             cur = state.unit5_auto_run
             if cur == "armed" and state.dark_room_coord is not None:
                 state.unit5_auto_run = "lit"
+                # 選択中フィールドのオフセットで原点校正（未選択時は青の規約/オフセット）。
+                side_key = state.field_side if state.field_side in ("red", "blue") else "blue"
                 goal_payload = _dark_room_goal(
-                    state.dark_room_coord, state.field_side
+                    state.dark_room_coord,
+                    state.field_side,
+                    state.dark_room_offset.get(side_key),
                 )
                 changed = True
             elif cur == "lit":

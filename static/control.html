@@ -479,11 +479,8 @@
           <h2 class="panel-title">操作</h2>
           <div class="btn-row">
             <button type="button" class="btn auto-run-btn" id="unit5AutoRun" data-state="off">5号機自動走行</button>
-            <button type="button" class="btn" data-dummy>現場到着</button>
-            <button type="button" class="btn" data-dummy>搬送開始</button>
-            <button type="button" class="btn" data-dummy>再起動</button>
-            <button type="button" class="btn" data-dummy>通信経路切替</button>
-            <button type="button" class="btn" data-dummy>カメラ再起動</button>
+            <button type="button" class="btn" id="unitReboot">再起動</button>
+            <button type="button" class="btn" id="unitShutdown">シャットダウン</button>
           </div>
         </section>
         <section class="panel panel--units">
@@ -811,6 +808,7 @@
 
       let viewMode = "both"; // "a" = 操作機のみ / "b" = 天カメのみ / "both" = 2画面
       let videoUnitA = 1;
+      let currentOperatingUnit = 1; // 操作中の号機（再起動/シャットダウン対象）
       let webrtcServer = "";
 
       const OVERHEAD_UNIT = 1; // 天カメ = 1号機のカメラ
@@ -856,6 +854,7 @@
           RC.setConnBadge(connBadge, s);
         },
         onState: function (st) {
+          currentOperatingUnit = st.control_operating_unit || currentOperatingUnit;
           roomUnits = st.room_units || roomUnits;
           if (st.room_analysis) {
             roomAnalysis = st.room_analysis;
@@ -937,14 +936,34 @@
         client.send({ type: "accept_control_request" });
       });
 
-      document.querySelectorAll("[data-dummy]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          btn.style.background = "#55555e";
-          setTimeout(function () {
-            btn.style.background = "";
-          }, 150);
-        });
-      });
+      // ---- 再起動 / シャットダウン（操作中の号機へ POST・確認ダイアログ付き）----
+      const unitRebootBtn = document.getElementById("unitReboot");
+      const unitShutdownBtn = document.getElementById("unitShutdown");
+
+      function powerAction(kind) {
+        const unit = currentOperatingUnit;
+        const label = kind === "shutdown" ? "シャットダウン" : "再起動";
+        if (!window.confirm(unit + "号機を" + label + "します。よろしいですか？")) return;
+        const path = kind === "shutdown" ? "/api/unit/shutdown" : "/api/unit/reboot";
+        fetch(path, { method: "POST" })
+          .then(function (res) {
+            return res.json().then(function (body) { return { ok: res.ok, body: body }; });
+          })
+          .then(function (r) {
+            const msg = (r.body && r.body.message) || "";
+            if (r.ok) {
+              showNotification({ text: unit + "号機 " + label + "要求を送信しました" + (msg ? "（" + msg + "）" : ""), active: true, timestamp: Date.now() / 1000 });
+            } else {
+              window.alert(unit + "号機の" + label + "に失敗しました。\n" + msg);
+            }
+          })
+          .catch(function (err) {
+            window.alert(unit + "号機の" + label + "要求を送信できませんでした。\n" + err);
+          });
+      }
+
+      unitRebootBtn.addEventListener("click", function () { powerAction("reboot"); });
+      unitShutdownBtn.addEventListener("click", function () { powerAction("shutdown"); });
     })();
   </script>
   <script src="/voice/voice-client.js"></script>

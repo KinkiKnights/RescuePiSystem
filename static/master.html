@@ -111,6 +111,39 @@
       background: var(--surface);
       border: 1px solid var(--border);
     }
+    .offset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .offset-field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .offset-field__title { font-size: 0.82rem; font-weight: 700; }
+    .offset-input {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 0.74rem;
+      color: var(--muted);
+    }
+    .offset-input input {
+      width: 5.5rem;
+      flex-shrink: 0;
+      padding: 0.35rem 0.5rem;
+      font-family: inherit;
+      font-size: 0.82rem;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    @media (max-width: 480px) { .offset-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -181,6 +214,29 @@
           <button type="button" class="btn btn--wide" data-field-side="clear">選択を解除</button>
         </div>
         <p class="video-mode-hint">選択した陣営を全モードのマップに反映します。赤＝入口は右辺の下半分、青＝入口は左辺の下半分に「入口」を描画します。</p>
+      </section>
+      <section>
+        <h2 class="section-title">暗室座標オフセット（原点校正・フィールド別・全モード共有）</h2>
+        <div class="offset-grid">
+          <div class="offset-field" data-offset-side="red">
+            <span class="offset-field__title">赤フィールド</span>
+            <label class="offset-input"><span>下方向（下+／上−）</span>
+              <input type="number" step="0.01" data-offset="red-x" placeholder="0.00" /></label>
+            <label class="offset-input"><span>右方向（右−／左+）</span>
+              <input type="number" step="0.01" data-offset="red-y" placeholder="0.00" /></label>
+          </div>
+          <div class="offset-field" data-offset-side="blue">
+            <span class="offset-field__title">青フィールド</span>
+            <label class="offset-input"><span>下方向（下+／上−）</span>
+              <input type="number" step="0.01" data-offset="blue-x" placeholder="0.00" /></label>
+            <label class="offset-input"><span>右方向（右−／左+）</span>
+              <input type="number" step="0.01" data-offset="blue-y" placeholder="0.00" /></label>
+          </div>
+        </div>
+        <div class="btn-grid" style="margin-top:6px;">
+          <button type="button" class="btn btn--wide" id="offsetApply">オフセットを反映</button>
+        </div>
+        <p class="video-mode-hint">正規化暗室座標→目標座標[m]変換時に、選択中フィールドの原点を校正します。単位は map フレーム[m]想定。符号規約は「下向き +・右向き −」。set_goal 送信時（5号機自動走行 armed→lit）に加算されます。</p>
       </section>
       <section>
         <h2 class="section-title">暗室座標（エンジニア指定・全モード共有）</h2>
@@ -295,7 +351,32 @@
             b.classList.toggle("is-active--red", side === "red" && s === "red");
             b.classList.toggle("is-active--blue", side === "blue" && s === "blue");
           });
+          // 暗室座標オフセットを入力欄へ反映（編集中の欄は上書きしない）
+          const off = st.dark_room_offset || {};
+          document.querySelectorAll("[data-offset]").forEach(function (el) {
+            if (document.activeElement === el) return;
+            const parts = el.dataset.offset.split("-"); // [side, axis]
+            const v = (off[parts[0]] || {})[parts[1]];
+            el.value = v == null ? "" : v;
+          });
         },
+      });
+
+      /* ---- 暗室座標オフセット（フィールド別・原点校正）を全モードへ共有 ---- */
+      document.getElementById("offsetApply").addEventListener("click", function () {
+        ["red", "blue"].forEach(function (side) {
+          const xEl = document.querySelector('[data-offset="' + side + '-x"]');
+          const yEl = document.querySelector('[data-offset="' + side + '-y"]');
+          const x = parseFloat(xEl.value);
+          const y = parseFloat(yEl.value);
+          client.send({
+            type: "set_dark_room_offset",
+            side: side,
+            x: isNaN(x) ? 0 : x,
+            y: isNaN(y) ? 0 : y,
+          });
+        });
+        log("暗室座標オフセットを反映（下+ / 右−）");
       });
 
       /* ---- フィールド陣営（赤／青）選択：全モードへ共有 ---- */
