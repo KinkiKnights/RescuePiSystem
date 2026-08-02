@@ -429,6 +429,12 @@ def _default_units() -> dict[int, dict[str, Any]]:
             "method": methods[i - 1],
             "disabled": False,
             "other_op": i in other_ops,
+            # 号機ごとの自動QR検出（アナリティクスの各映像スキャナが確定ゲート無しで
+            # 随時共有する）。room_analysis[room].qr（確定ゲート付き＝解析者が確定）
+            # とは別系統で、各号機の映像から現在/直近に読めた QR をそのまま持つ。
+            "qr": "",            # 直近/現在検出した QR テキスト（未検出は ""）
+            "qr_ts": 0,          # 最終更新のエポックミリ秒（未検出は 0・Date.now 互換）
+            "qr_active": False,  # 現在検出保持中か（保持タイマ内は True）
         }
         for i in range(1, 6)
     }
@@ -935,6 +941,29 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
                     if key in msg:
                         ra[key] = bool(msg[key])
                 changed = True
+
+    elif msg_type == "set_unit_qr":
+        # 号機ごとの自動QR検出を共有状態（units[n]）へ反映する（確定ゲート無し）。
+        # アナリティクスの各映像スキャナが「テキスト変化 / 検出↔未検出の反転」時のみ
+        # 送るため、ここでは unit を 1..5 に検証し、qr は文字列化＋長さ制限のうえ、
+        # テキストか検出状態が実際に変わった時だけ更新・配信する（同一値の高頻度
+        # 送信で全クライアントへ無駄に再送しないよう抑制）。room_analysis[room].qr
+        # （確定ゲート付き）は一切触らない＝別系統。
+        try:
+            unit = int(msg.get("unit", 0))
+        except (TypeError, ValueError):
+            unit = 0
+        async with state.lock:
+            u = state.units.get(unit)
+            if u is not None and 1 <= unit <= 5:
+                active = bool(msg.get("active", False))
+                # 未検出（active=False）ならテキストは空にそろえる。
+                qr = str(msg.get("qr", ""))[:256] if active else ""
+                if u.get("qr") != qr or u.get("qr_active") != active:
+                    u["qr"] = qr
+                    u["qr_active"] = active
+                    u["qr_ts"] = int(time.time() * 1000)
+                    changed = True
 
     elif msg_type == "complete_task":
         task_id = int(msg.get("task_id", 0))

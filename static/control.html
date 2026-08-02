@@ -191,6 +191,23 @@
     .unit-btn.is-requested .unit-btn__conn {
       color: rgba(255, 255, 255, 0.85);
     }
+    /* 号機ごとの自動QR共有（units[n].qr）の読み取り専用表示。検出中は緑。 */
+    .unit-btn__qr {
+      display: block;
+      margin-top: 0.2rem;
+      font-size: 0.68rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .unit-btn__qr.is-active {
+      color: #6fdc8c;
+      font-weight: 700;
+    }
+    .unit-btn.is-operating .unit-btn__qr {
+      color: rgba(255, 255, 255, 0.85);
+    }
     .center-video {
       display: flex;
       flex-direction: column;
@@ -588,6 +605,12 @@
               : u.connected
               ? RC.escapeHtml(u.method || "—") + " " + (u.delay_ms != null ? u.delay_ms + "ms" : "")
               : "切断";
+            // 号機ごとの自動QR共有（units[n].qr）を読み取り専用で表示（検出中は緑）。
+            const qrActive = !!u.qr_active && !!u.qr;
+            const qrLine = u.qr
+              ? '<span class="unit-btn__qr' + (qrActive ? " is-active" : "") +
+                '">QR: ' + RC.escapeHtml(u.qr) + "</span>"
+              : "";
             return (
               '<button type="button" class="unit-btn' +
               (isSelf ? " is-operating" : "") +
@@ -603,7 +626,9 @@
               dot +
               '"></span>' +
               conn +
-              "</span></button>"
+              "</span>" +
+              qrLine +
+              "</button>"
             );
           })
           .join("");

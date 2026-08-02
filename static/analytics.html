@@ -70,6 +70,42 @@
       background: rgba(47, 143, 70, 0.85);
       border-color: #2f8f46;
     }
+
+    /* ---- 号機ごとの自動QR共有（読み取り専用・全画面共有の units[n].qr を表示） ---- */
+    .unit-qr {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+    }
+    .unit-qr__list {
+      list-style: none;
+      margin: 0;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .unit-qr__item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.74rem;
+    }
+    .unit-qr__unit {
+      flex-shrink: 0;
+      font-weight: 700;
+      color: var(--muted);
+      min-width: 3.4rem;
+    }
+    .unit-qr__text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+    }
+    .unit-qr__item.is-active .unit-qr__text {
+      color: #6fdc8c;
+      font-weight: 700;
+    }
     .view--ten { grid-area: r1; }
     .view--target { grid-area: r2; }
     .view--audio {
@@ -357,6 +393,10 @@
             <span class="dark-room__coord" id="darkRoomCoord">未設定</span>
           </div>
         </div>
+        <div class="unit-qr">
+          <h2 class="panel-title">号機QR（自動共有）</h2>
+          <ul class="unit-qr__list" id="unitQrList"></ul>
+        </div>
       </aside>
 
       <section class="col panel">
@@ -458,6 +498,24 @@
         darkRoomMap.setSide(side || null);
         darkRoomCoordEl.textContent = RC.formatCoord(coord);
       }
+
+      /* 号機ごとの自動QR共有（サーバー権威 units[n].qr / qr_active）を左カラムに
+         読み取り専用で一覧表示。確定ゲート無しでラウンドトリップした値を可視化する。 */
+      const unitQrList = document.getElementById("unitQrList");
+      function renderUnitQr(units) {
+        unitQrList.innerHTML = [1, 2, 3, 4, 5]
+          .map(function (n) {
+            const u = units[n] || {};
+            const active = !!u.qr_active && !!u.qr;
+            const text = u.qr ? RC.escapeHtml(u.qr) : "未検出";
+            return (
+              '<li class="unit-qr__item' + (active ? " is-active" : "") + '">' +
+              '<span class="unit-qr__unit">' + n + "号機</span>" +
+              '<span class="unit-qr__text">' + text + "</span></li>"
+            );
+          })
+          .join("");
+      }
       let currentTargetUnit = 0;
       let pendingRequestUnit = 0;
       let webrtcServer = "";
@@ -468,6 +526,17 @@
 
       function renderTargetVideo(unit) {
         if (unit === currentTargetUnit) return;
+        // 対象機が切り替わる：対象機フィードで検出中だった QR を旧号機側でクリア
+        // （新号機の映像に旧号機の QR が残らないよう）。フィード状態も初期化する。
+        const tf = qrFeeds.target;
+        if (tf) {
+          if (tf.wasActive && tf.unit) sendUnitQr(tf, tf.unit, "", false);
+          tf.unit = unit;
+          tf.text = "";
+          tf.at = 0;
+          tf.wasActive = false;
+          tf.lastSent = null;
+        }
         currentTargetUnit = unit;
         viewTarget.innerHTML = RC.videoBox(unit, "", { label: "対象機（" + unit + "号機）" });
         RC.initVideos(viewTarget, webrtcServer);
@@ -654,10 +723,25 @@
          状態へ送る（control モードと同一運用）。QR ライブラリは同梱の
          static/jsqr.js（createQrScanner が使用）でオフライン動作。 */
       const QR_HOLD_MS = 1600; // この時間内に再検出が無ければ「未検出」表示へ戻す
+      // 各フィードは対応号機（ten=天カメ＝常に1号機 / target=選択中の対象機）を
+      // unit に持ち、その号機の共有状態 units[unit].qr へ自動反映する。wasActive/
+      // lastSent は保持タイマ切れの検出と、サーバーへの重複送信抑制に使う。
       const qrFeeds = {
-        ten: { key: "ten", view: viewTen, text: "", at: 0 },
-        target: { key: "target", view: viewTarget, text: "", at: 0 },
+        ten: { key: "ten", view: viewTen, text: "", at: 0, unit: 1, wasActive: false, lastSent: null },
+        target: { key: "target", view: viewTarget, text: "", at: 0, unit: 0, wasActive: false, lastSent: null },
       };
+      /* 各映像スキャナの検出を号機別の共有状態（set_unit_qr）へ送る（確定ゲート無し）。
+         高頻度・重複を避けるため、直近に送った内容（号機・qr・active）と同一なら
+         送らない＝「検出テキストの変化」「検出↔未検出の反転」「対象機の切替」時のみ
+         送信する。700ms ごとのデコード全てを送ってブロードキャスト輻輳を招かない。 */
+      function sendUnitQr(feed, unit, text, active) {
+        if (!unit || unit < 1 || unit > 5) return;
+        const qr = active ? text : "";
+        const last = feed.lastSent;
+        if (last && last.unit === unit && last.qr === qr && last.active === active) return;
+        feed.lastSent = { unit: unit, qr: qr, active: active };
+        client.send({ type: "set_unit_qr", unit: unit, qr: qr, active: active });
+      }
       function ensureQrTag(viewEl) {
         let tag = viewEl.querySelector(".qr-tag");
         if (!tag) {
@@ -680,7 +764,10 @@
           function (text) {
             feed.text = text;
             feed.at = Date.now();
+            feed.wasActive = true;
             renderQrTag(feed);
+            // 号機別の共有状態へ自動反映（確定ゲート無し・重複は sendUnitQr が抑制）
+            sendUnitQr(feed, feed.unit, text, true);
             // 中央メインに選択中の映像なら、選択中ルームの負傷（QR）へ反映
             if (stage.dataset.sel === feed.key) {
               cur().qr = text;
@@ -692,9 +779,18 @@
         );
         renderQrTag(feed); // 初期表示（未検出）
       });
-      // 検出が途切れたら各タグを「未検出」へ戻す（定期更新）
+      // 検出が途切れたら各タグを「未検出」へ戻し、保持タイマ切れなら共有状態も
+      // active:false でクリアする（定期更新）。
       setInterval(function () {
-        Object.keys(qrFeeds).forEach(function (key) { renderQrTag(qrFeeds[key]); });
+        Object.keys(qrFeeds).forEach(function (key) {
+          const feed = qrFeeds[key];
+          const detected = !!(feed.text && Date.now() - feed.at < QR_HOLD_MS);
+          if (feed.wasActive && !detected) {
+            sendUnitQr(feed, feed.unit, "", false);
+            feed.wasActive = false;
+          }
+          renderQrTag(feed);
+        });
       }, 500);
       colorConfirm.addEventListener("click", function () {
         cur().colorDone = !cur().colorDone;
@@ -731,6 +827,7 @@
         const unit = st.analytics_target_unit || 1;
         selectedUnit = unit;
         renderUnitBar(st.units || {});
+        renderUnitQr(st.units || {});
         renderTargetVideo(unit);
         updateAudioFrame(unit);
 

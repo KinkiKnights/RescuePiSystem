@@ -41,6 +41,9 @@
 | `method` | `"WiFi"`/`"TPIP"` | 通信方式 |
 | `disabled` | bool | 行動不能フラグ |
 | `other_op` | bool | 別オペレーターが操縦中（ダミー） |
+| `qr` | str | **号機ごとの自動QR検出テキスト**（未検出は `""`）。アナリティクスの各映像スキャナ（天カメ=1号機・対象機=選択号機）が読み取った値を**確定ゲート無し**で随時共有する。`room_analysis[room].qr`（解析者が確定して共有する確定ゲート付き）とは**別系統**で、こちらは号機の映像から現在/直近に読めた値をそのまま持つ。`set_unit_qr` で更新 |
+| `qr_ts` | int | `qr`/`qr_active` を最後に更新したエポックミリ秒（未検出は `0`・`Date.now()` 互換）。サーバーが更新時に採番 |
+| `qr_active` | bool | 現在検出を保持中か（フロントの保持タイマ内は `true`、途切れると `false`） |
 
 ### `room_analysis[room]`
 
@@ -90,7 +93,8 @@ ws://<host>:8765/ws/<role>
 | `accept_control_request` | — | 保留中の割り込み要請を承諾（カメラ・操縦を切替） |
 | `accept_analysis_request` | — | 保留中の解析要請を承諾（解析対象を切替） |
 | `update_analysis` | `analysis` の各キー | 旧・全体解析データを更新 |
-| `set_room_analysis` | `room`, （`stove`/`color`/`notes`/`qr`/`stoveDone`/`injuryDone`/`colorDone`） | 部屋ごとの解析を更新（送られたキーのみ） |
+| `set_room_analysis` | `room`, （`stove`/`color`/`notes`/`qr`/`stoveDone`/`injuryDone`/`colorDone`） | 部屋ごとの解析を更新（送られたキーのみ）。**確定ゲート付きの部屋別QR** はこちら（`set_unit_qr` とは別系統） |
+| `set_unit_qr` | `unit`, `qr`, `active` | **号機ごとの自動QR検出**を `units[n]`（`qr`/`qr_ts`/`qr_active`）へ反映（**確定ゲート無し**）。`unit` を 1〜5 に検証、`qr` は文字列化＋256文字に切り詰め。`active=false`（未検出）のとき `qr` は空にそろえる。`qr_ts` はサーバーがエポックms で採番。**テキストか検出状態が実際に変化した時だけ**更新＆配信（同一値の高頻度送信は無視＝ブロードキャスト輻輳を抑制）。アナリティクスの各映像スキャナが「テキスト変化／検出↔未検出の反転／対象機切替」時のみ送信する。「10. 号機ごとの自動QR共有」節参照 |
 | `complete_task` | `task_id` | 該当タスクを完了に |
 | `set_dark_room_coord` | `coord` | 暗室座標を設定／解除（全モード共有）。`coord` が `{x, y}`（ともに 0〜1 の実数）なら設定、`null` なら解除。範囲外・型不正なペイロードは無視（state 不変）。主にエンジニアモードから送信 |
 | `set_field_side` | `side` | フィールド陣営を設定／解除（全モード共有）。`side` が `"red"`/`"blue"` なら設定、`null` なら未選択に解除。それ以外の値は無視（state 不変）。主にマスターモードから送信 |
@@ -315,3 +319,37 @@ COMMUNICATION_SPEC.md「4. 座標系」に従い `main.py` の `_dark_room_goal(
 - **要確認**: 単位は map フレーム[m]を想定（正規化値ではない）。赤フィールドは内部 y 軸が
   `(1-nx)`（左向き正）のため、右方向オフセットの物理的向きは要確認（暫定で青と同じく減算）。
 - `dark_room_offset` は原点校正（フィールド固有の設定値）のため `reset` では消去しない。
+
+---
+
+## 10. 号機ごとの自動QR共有（確定ゲート無し）
+
+各号機の映像から読めた QR を、**解析者の「確定」を待たずに**号機単位でサーバー権威の
+共有状態へ載せ、全画面（control / analytics / reporter / engineer / master）が
+「その号機で今／直近に読めた QR」を参照できるようにする仕組み。
+
+- **格納先**: `units[n]` の `qr` / `qr_ts` / `qr_active`（「1. 共有状態」`units[n]` 表を参照）。
+- **確定ゲート付きの `room_analysis[room].qr` とは別系統**（そちらは従来どおり解析者が
+  ［結果確定］を押して部屋別に共有する。本節はそれを一切変更しない）。
+
+### 10.1 送信元と間引き（analytics.html）
+
+- アナリティクスは可視の各映像（天カメ=1号機・対象機=選択号機）ごとに
+  `RC.createQrScanner`（`static/jsqr.js`・約 700ms 間隔）を回している。各スキャナの
+  検出を **号機別に** `set_unit_qr` で送る。
+- **間引き / 重複抑制**: 700ms のデコード全てを送るとブロードキャストが輻輳するため、
+  フロントは直近に送った `{unit, qr, active}` と同一なら送らない。実際に送るのは:
+  - 検出テキストが**変化**したとき（`active:true`）、
+  - **検出↔未検出が反転**したとき（保持タイマ `QR_HOLD_MS≈1600ms` 切れで `active:false`）、
+  - **対象機を切り替えた**とき（旧号機を `active:false` でクリアしてから新号機へ）。
+- サーバー側も二重の抑制として、`qr` テキストか `qr_active` が**実際に変化した時だけ**
+  `units[n]` を更新し state を配信する（同一値の再送は state 不変で無配信）。
+
+### 10.2 受信側（consumers）
+
+- **analytics.html**: 左カラムに「号機QR（自動共有）」の読み取り専用一覧を追加し、
+  `units[n].qr`（検出中=`qr_active` は緑）を 1〜5 号機ぶん表示する。従来の各映像左下の
+  ローカル QR タグ（`.qr-tag`）はそのまま残す。
+- **control.html**: 「機体選択」の各号機ボタンに、その号機の共有 QR（`units[n].qr`・
+  検出中は緑）を 1 行追加表示する（読み取り専用）。
+- `qr_ts` は `Date.now()` 互換のエポックms。必要なら `RC.formatAgo` で経過表示に使える。
