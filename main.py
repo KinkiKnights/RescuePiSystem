@@ -420,7 +420,6 @@ def _default_room_analysis() -> dict[str, dict[str, Any]]:
 def _default_units() -> dict[int, dict[str, Any]]:
     methods = ["WiFi", "TPIP", "WiFi", "TPIP", "WiFi"]
     delays = [32, 48, 55, 41, 67]
-    other_ops = {3}  # 別オペレータが操縦中のダミー設定（1つまで）
     return {
         i: {
             "unit": i,
@@ -428,7 +427,6 @@ def _default_units() -> dict[int, dict[str, Any]]:
             "connected": i != 2,
             "method": methods[i - 1],
             "disabled": False,
-            "other_op": i in other_ops,
             # 号機ごとの自動QR検出（アナリティクスの各映像スキャナが確定ゲート無しで
             # 随時共有する）。room_analysis[room].qr（確定ゲート付き＝解析者が確定）
             # とは別系統で、各号機の映像から現在/直近に読めた QR をそのまま持つ。

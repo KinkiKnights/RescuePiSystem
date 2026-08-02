@@ -169,9 +169,6 @@
       background: #2f8f46;
       animation: badgeBlink 1s ease-in-out infinite;
     }
-    .unit-btn__badge--other {
-      background: #6a6a72;
-    }
     .unit-btn__badge--disabled {
       background: var(--danger);
     }
@@ -589,15 +586,12 @@
           .map(function (n) {
             const u = units[n] || {};
             const isSelf = n === st.control_operating_unit;
-            const isOther = !!u.other_op && !isSelf;
             const isReq = !!req.pending && req.unit === n;
             let badge = "";
             if (u.disabled) {
               badge = '<span class="unit-btn__badge unit-btn__badge--disabled">行動不能</span>';
             } else if (isSelf) {
               badge = '<span class="unit-btn__badge unit-btn__badge--self">操縦中</span>';
-            } else if (isOther) {
-              badge = '<span class="unit-btn__badge unit-btn__badge--other">別オペ中</span>';
             }
             const dot = u.connected ? "status-dot--ok" : "status-dot--ng";
             const conn = u.disabled
