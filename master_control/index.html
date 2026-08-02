@@ -87,6 +87,11 @@
 
     .card-actions { display: flex; gap: 6px; }
 
+    /* ── Autostart toggle (per card) ── */
+    .card-auto { margin-top: 9px; font-size: 0.72em; color: #8b949e; }
+    .card-auto label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .card-auto input { accent-color: #3fb950; cursor: pointer; }
+
     /* ── Buttons ── */
     button {
       padding: 4px 10px;
@@ -156,12 +161,13 @@
     /* ── Config rows ── */
     .cfg-header, .cfg-row {
       display: grid;
-      grid-template-columns: 40px 1fr 80px 2fr 28px;
+      grid-template-columns: 40px 1fr 80px 2fr 44px 28px;
       gap: 6px; align-items: center;
       margin-bottom: 5px;
     }
     .cfg-header { color: #484f58; font-size: 0.72em; margin-bottom: 8px; padding: 0 2px; }
-    .cfg-row input, .cfg-row select {
+    .cfg-header .cfg-auto-col { text-align: center; }
+    .cfg-row input[type="number"], .cfg-row input[type="text"], .cfg-row select {
       background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
       color: #c9d1d9; font-family: inherit; font-size: 0.8em;
       padding: 5px 7px; width: 100%;
@@ -170,6 +176,8 @@
       outline: none; border-color: #58a6ff;
     }
     .cfg-row select option { background: #161b22; }
+    .cfg-auto { display: flex; justify-content: center; align-items: center; }
+    .cfg-auto input { accent-color: #3fb950; cursor: pointer; width: 15px; height: 15px; }
     .btn-del {
       color: #f85149; border-color: transparent; padding: 4px 6px;
       font-size: 0.85em; background: transparent; line-height: 1;
@@ -249,7 +257,7 @@
       </div>
       <div class="modal-body">
         <div class="cfg-header">
-          <span>ID</span><span>Name</span><span>Type</span><span>Command</span><span></span>
+          <span>ID</span><span>Name</span><span>Type</span><span>Command</span><span class="cfg-auto-col">Auto</span><span></span>
         </div>
         <div id="cfg-rows"></div>
       </div>
@@ -322,6 +330,9 @@
             <button class="btn-stop"    onclick="act('stop',${p.id})"    ${p.status==='stopped'?'disabled':''}>&#9632; Stop</button>
             <button class="btn-restart" onclick="act('restart',${p.id})">&#8635; Restart</button>
           </div>
+          <div class="card-auto">
+            <label><input type="checkbox" ${p.autostart?'checked':''} onchange="setAutostart(${p.id}, this.checked)"> 起動時に自動実行</label>
+          </div>
         </div>
       `).join('');
     }
@@ -331,6 +342,22 @@
       const d = await r.json();
       toast(d.message);
       fetchStatus();
+    }
+
+    async function setAutostart(id, enabled) {
+      try {
+        const r = await fetch(`/autostart/${id}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ enabled }),
+        });
+        const d = await r.json();
+        toast(d.message);
+      } catch (_) {
+        toast('autostart 更新に失敗しました');
+      } finally {
+        fetchStatus();
+      }
     }
 
     async function sysAction(type) {
@@ -371,6 +398,7 @@
           <option value="bash" ${c.type==='bash'?'selected':''}>bash</option>
         </select>
         <input type="text" value="${escHtml(c.cmd ?? '')}" placeholder="command">
+        <span class="cfg-auto"><input type="checkbox" title="起動時に自動実行" ${c.autostart?'checked':''}></span>
         <button class="btn-del" onclick="this.closest('.cfg-row').remove()">&#10005;</button>
       `;
       container.appendChild(row);
@@ -384,13 +412,13 @@
       const rows = document.querySelectorAll('.cfg-row');
       const configs = [];
       for (const row of rows) {
-        const [idEl, nameEl, typeEl, cmdEl] = row.querySelectorAll('input, select');
+        const [idEl, nameEl, typeEl, cmdEl, autoEl] = row.querySelectorAll('input, select');
         const id = parseInt(idEl.value);
         if (!id || !nameEl.value.trim() || !cmdEl.value.trim()) {
           document.getElementById('cfg-msg').textContent = 'ID・Name・Commandは必須です';
           return;
         }
-        configs.push({ id, name: nameEl.value.trim(), type: typeEl.value, cmd: cmdEl.value.trim() });
+        configs.push({ id, name: nameEl.value.trim(), type: typeEl.value, cmd: cmdEl.value.trim(), autostart: autoEl.checked });
       }
       const r = await fetch('/programs/config', {
         method: 'PUT',
@@ -410,8 +438,8 @@
     function collectRows() {
       const rows = document.querySelectorAll('.cfg-row');
       return Array.from(rows).map(row => {
-        const [idEl, nameEl, typeEl, cmdEl] = row.querySelectorAll('input, select');
-        return { id: parseInt(idEl.value) || 0, name: nameEl.value.trim(), type: typeEl.value, cmd: cmdEl.value.trim() };
+        const [idEl, nameEl, typeEl, cmdEl, autoEl] = row.querySelectorAll('input, select');
+        return { id: parseInt(idEl.value) || 0, name: nameEl.value.trim(), type: typeEl.value, cmd: cmdEl.value.trim(), autostart: autoEl.checked };
       });
     }
 

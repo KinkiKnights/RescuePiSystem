@@ -95,11 +95,12 @@ class ProcessManager:
         with self._lock:
             return [
                 {
-                    'id':     prog['id'],
-                    'name':   prog['name'],
-                    'type':   prog['type'],
-                    'status': 'running' if self._running(prog) else 'stopped',
-                    'pid':    prog['process'].pid if self._running(prog) else None,
+                    'id':        prog['id'],
+                    'name':      prog['name'],
+                    'type':      prog['type'],
+                    'status':    'running' if self._running(prog) else 'stopped',
+                    'pid':       prog['process'].pid if self._running(prog) else None,
+                    'autostart': bool(prog.get('autostart', False)),
                 }
                 for prog in sorted(self.programs.values(), key=lambda p: p['id'])
             ]
@@ -107,20 +108,57 @@ class ProcessManager:
     def get_config(self):
         with self._lock:
             return [
-                {'id': p['id'], 'name': p['name'], 'type': p['type'], 'cmd': p['cmd']}
+                {'id': p['id'], 'name': p['name'], 'type': p['type'], 'cmd': p['cmd'],
+                 'autostart': bool(p.get('autostart', False))}
                 for p in sorted(self.programs.values(), key=lambda p: p['id'])
             ]
 
     def save_config(self, new_configs):
         with self._lock:
+            old = self.programs
             new_ids = {c['id'] for c in new_configs}
-            for pid, prog in list(self.programs.items()):
+            for pid, prog in list(old.items()):
                 changed = any(c['id'] == pid and c['cmd'] != prog['cmd'] for c in new_configs)
                 if (pid not in new_ids or changed) and self._running(prog):
                     _terminate_tree(prog['process'])
+            # Normalise the autostart flag: honour an explicit value from the
+            # payload, otherwise preserve whatever the program had before so the
+            # basic config editor (which may omit it) never silently clears it.
+            for c in new_configs:
+                if 'autostart' in c:
+                    c['autostart'] = bool(c['autostart'])
+                else:
+                    prev = old.get(c['id'])
+                    c['autostart'] = bool(prev.get('autostart', False)) if prev else False
             with open(PROGRAMS_FILE, 'w') as f:
                 json.dump(new_configs, f, ensure_ascii=False, indent=2)
             self.programs = {c['id']: dict(c, process=None) for c in new_configs}
+
+    def set_autostart(self, prog_id, enabled):
+        """Toggle a program's boot-autostart flag; persist to disk AND update the
+        in-memory state so it takes effect without a service restart."""
+        with self._lock:
+            prog = self.programs.get(prog_id)
+            if not prog:
+                return False, 'Program not found'
+            prog['autostart'] = bool(enabled)
+            with open(PROGRAMS_FILE, 'w') as f:
+                json.dump(self._snapshot(), f, ensure_ascii=False, indent=2)
+            state = 'ON' if enabled else 'OFF'
+            return True, f"#{prog_id} autostart {state}"
+
+    def autostart_ids(self):
+        """IDs of programs flagged for boot autostart, in ascending id order."""
+        with self._lock:
+            return [p['id'] for p in sorted(self.programs.values(), key=lambda p: p['id'])
+                    if p.get('autostart')]
+
+    def _snapshot(self):
+        """On-disk representation of the current in-memory programs (no process)."""
+        return [
+            {k: v for k, v in p.items() if k != 'process'}
+            for p in sorted(self.programs.values(), key=lambda p: p['id'])
+        ]
 
     @staticmethod
     def _running(prog):
@@ -186,6 +224,22 @@ class APIHandler(BaseHTTPRequestHandler):
             ok, msg = fn(prog_id)
             self._json({'ok': ok, 'message': msg})
 
+        elif len(parts) == 2 and parts[0] == 'autostart':
+            try:
+                prog_id = int(parts[1])
+            except ValueError:
+                self._not_found()
+                return
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length) if length else b''
+            try:
+                enabled = bool(json.loads(body).get('enabled')) if body else False
+            except Exception as e:
+                self._json({'ok': False, 'message': str(e)})
+                return
+            ok, msg = self.pm.set_autostart(prog_id, enabled)
+            self._json({'ok': ok, 'message': msg})
+
         elif parts == ['system', 'reboot']:
             self._json({'ok': True, 'message': 'Rebooting...'})
             threading.Timer(1.0, lambda: os.system('sudo reboot')).start()
@@ -239,12 +293,37 @@ class APIHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def run_autostart(pm):
+    """Launch every program flagged autostart when the service boots.
+
+    Runs each start independently: logs the outcome and never lets a single
+    failure abort server startup. Set MASTER_AUTOSTART_DRYRUN=1 to log the
+    selection without actually spawning any process (used for safe testing).
+    """
+    dry_run = os.environ.get('MASTER_AUTOSTART_DRYRUN') == '1'
+    ids = pm.autostart_ids()
+    suffix = ' (DRY-RUN)' if dry_run else ''
+    print(f'[Robot Master] Autostart targets: {ids}{suffix}')
+    for pid in ids:
+        try:
+            if dry_run:
+                ok, msg = True, '(dry-run: not launched)'
+            else:
+                ok, msg = pm.start(pid)
+            print(f'[Robot Master] Autostart #{pid}: {"OK" if ok else "SKIP/FAIL"} — {msg}')
+        except Exception as e:
+            print(f'[Robot Master] Autostart #{pid}: ERROR — {e}')
+
+
 def main():
     pm  = ProcessManager()
     cpu = CPUMonitor(interval=5)
 
     APIHandler.pm  = pm
     APIHandler.cpu = cpu
+
+    # Auto-launch configured programs on boot before accepting requests.
+    run_autostart(pm)
 
     # ThreadingHTTPServer: ブラウザの同時接続(ページ取得+/statusポーリング等)を
     # 並行処理する。単一スレッドのHTTPServerだと1接続の処理中に他がブロックされ、
