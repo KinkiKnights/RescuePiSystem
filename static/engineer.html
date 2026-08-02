@@ -188,6 +188,14 @@
       <aside class="col col--left panel">
         <h2 class="panel-title">タスク進行状況</h2>
         <div class="task-list task-list--clickable" id="taskList"></div>
+        <div class="dark-room" id="darkRoom">
+          <h2 class="panel-title">暗室座標指定</h2>
+          <div class="field-map" id="darkRoomMap"></div>
+          <div class="dark-room__foot">
+            <span class="dark-room__coord" id="darkRoomCoord">未設定</span>
+            <button type="button" class="btn dark-room__clear" id="darkRoomClear">クリア</button>
+          </div>
+        </div>
       </aside>
 
       <section class="col panel">
@@ -244,7 +252,6 @@
 
       let selectedUnit = 1;
       let ctrlHeld = false;
-      let videoMode = "file";
       let webrtcServer = "";
 
       /* ---- 映像 3x2 ＋ 接続情報セルを一度だけ構築 ---- */
@@ -254,7 +261,7 @@
         '<div class="conn-cell__title">接続情報</div>' +
         '<div class="conn-tiles" id="connTiles"></div>' +
         "</div>";
-      RC.initVideos(videoGrid, videoMode, webrtcServer);
+      RC.initVideos(videoGrid, webrtcServer);
       const connTilesEl = document.getElementById("connTiles");
 
       /* ---- 対象号機の選択（カメラ映像／接続タイルのクリック） ---- */
@@ -427,6 +434,25 @@
         });
       }
 
+      /* ---- 暗室座標指定（マップをクリックで設定・全モードへ共有） ---- */
+      const darkRoomMap = document.getElementById("darkRoomMap");
+      const darkRoomCoord = document.getElementById("darkRoomCoord");
+      const darkRoomClear = document.getElementById("darkRoomClear");
+      const fieldMap = RC.createFieldMap(darkRoomMap, {
+        interactive: true,
+        onPick: function (c) {
+          client.send({ type: "set_dark_room_coord", coord: { x: c.x, y: c.y } });
+        },
+      });
+      darkRoomClear.addEventListener("click", function () {
+        client.send({ type: "set_dark_room_coord", coord: null });
+      });
+      function renderDarkRoom(coord, side) {
+        fieldMap.setCoord(coord);
+        fieldMap.setSide(side || null);
+        darkRoomCoord.textContent = RC.formatCoord(coord);
+      }
+
       /* ---- WebSocket ---- */
       const client = RC.createWsClient("engineer", {
         onStatus: function (s) {
@@ -441,13 +467,12 @@
           renderConn(st);
           updateCameraDisabled(latestUnits);
           updateDisableButton();
+          renderDarkRoom(st.dark_room_coord || null, st.field_side || null);
 
-          const nextMode = st.video_mode || "file";
           const nextServer = st.webrtc_server || "";
-          if (nextMode !== videoMode || nextServer !== webrtcServer) {
-            videoMode = nextMode;
+          if (nextServer !== webrtcServer) {
             webrtcServer = nextServer;
-            RC.initVideos(videoGrid, videoMode, webrtcServer);
+            RC.initVideos(videoGrid, webrtcServer);
           }
         },
       });

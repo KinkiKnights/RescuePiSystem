@@ -400,3 +400,82 @@ html, body {
 .task-list--clickable .task-row { cursor: pointer; }
 .task-list--clickable .task-row:not(.is-done):hover { background: rgba(255, 255, 255, 0.1); }
 .task-list--clickable .task-row.is-done { cursor: default; }
+
+/* ===== 暗室座標マップ（engineer=クリック指定 / 他モード=読み取り専用表示） ===== */
+.dark-room {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.field-map {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 6px;
+}
+.field-map__svg {
+  display: block;
+  width: 100%;
+  /* viewBox(200x200=1:1／実寸1800×1800mm) と要素比を一致させ、クリック位置＝正規化座標にする */
+  aspect-ratio: 1 / 1;
+  background: #1e1e22;
+  border: 1px solid var(--border);
+}
+.field-map--interactive .field-map__svg { cursor: crosshair; }
+/* 全面暗室（フィールド全体を表す 1 枚の暗い正方形） */
+.fm-field {
+  fill: #1b1b20;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+/* 入口（赤フィールド＝右辺下半分／青フィールド＝左辺下半分） */
+.fm-entrance { pointer-events: none; }
+.fm-entrance__seg--red { fill: var(--danger); }
+.fm-entrance__seg--blue { fill: var(--accent); }
+.fm-entrance__tag {
+  fill: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: #000000;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.fm-marker { pointer-events: none; }
+.fm-marker__cross { stroke: #ffffff; stroke-width: 1.5; }
+.fm-marker__dot {
+  fill: var(--danger);
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+.fm-marker__tag {
+  fill: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #000000;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.dark-room__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+.dark-room__coord {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.dark-room__clear {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+}

@@ -14,6 +14,12 @@
       grid-template-columns: 220px 1fr 220px;
       gap: 0;
     }
+    /* 左列（タスク＋暗室座標）：タスクをスクロール、暗室座標マップを下部に固定表示 */
+    .control-body > .panel:first-child {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
     .right-col {
       display: flex;
       flex-direction: column;
@@ -383,6 +389,33 @@
       0%, 100% { background: #c46a1a; }
       50% { background: #e8943a; }
     }
+    /* 5号機自動走行ボタン：off=消灯 / armed=点滅 / lit=点灯 の3視覚状態 */
+    .auto-run-btn { position: relative; }
+    .auto-run-btn[data-state="off"] {
+      color: var(--muted);
+    }
+    .auto-run-btn[data-state="armed"] {
+      color: #ffffff;
+      border-color: #e8943a;
+      animation: autoRunBlink 1.1s ease-in-out infinite;
+    }
+    .auto-run-btn[data-state="armed"]:hover {
+      box-shadow: 0 0 10px 2px rgba(232, 148, 58, 0.75);
+    }
+    .auto-run-btn[data-state="lit"] {
+      color: #ffffff;
+      background: #2f8f46;
+      border-color: #37b357;
+      box-shadow: 0 0 10px 2px rgba(47, 143, 70, 0.7);
+    }
+    .auto-run-btn[data-state="lit"]:hover {
+      background: #35a052;
+      border-color: #37b357;
+    }
+    @keyframes autoRunBlink {
+      0%, 100% { background: #c46a1a; }
+      50% { background: #e8943a; }
+    }
   </style>
 </head>
 <body>
@@ -402,6 +435,13 @@
       <section class="panel">
         <h2 class="panel-title">タスク進行状況</h2>
         <div class="task-list task-list--clickable" id="taskList"></div>
+        <div class="dark-room">
+          <h2 class="panel-title">暗室座標（エンジニア指定）</h2>
+          <div class="field-map" id="darkRoomMap"></div>
+          <div class="dark-room__foot">
+            <span class="dark-room__coord" id="darkRoomCoord">未設定</span>
+          </div>
+        </div>
       </section>
       <section class="panel center-video">
         <h2 class="panel-title">ロボットカメラ — <span id="videoUnitLabel">操作機 + 天カメ</span></h2>
@@ -438,6 +478,7 @@
         <section class="panel">
           <h2 class="panel-title">操作</h2>
           <div class="btn-row">
+            <button type="button" class="btn auto-run-btn" id="unit5AutoRun" data-state="off">5号機自動走行</button>
             <button type="button" class="btn" data-dummy>現場到着</button>
             <button type="button" class="btn" data-dummy>搬送開始</button>
             <button type="button" class="btn" data-dummy>再起動</button>
@@ -484,6 +525,26 @@
       let pendingRequestUnit = 0;
 
       let roomUnits = { A: 4, B: 3, C: 5 };
+
+      /* 暗室座標（読み取り専用マップ・エンジニアが指定した位置を共有表示） */
+      const darkRoomCoordEl = document.getElementById("darkRoomCoord");
+      const darkRoomMap = RC.createFieldMap(document.getElementById("darkRoomMap"), {});
+      function renderDarkRoom(coord, side) {
+        darkRoomMap.setCoord(coord);
+        darkRoomMap.setSide(side || null);
+        darkRoomCoordEl.textContent = RC.formatCoord(coord);
+      }
+
+      /* 5号機自動走行ボタン（サーバー権威の unit5_auto_run を反映） */
+      const unit5AutoRunBtn = document.getElementById("unit5AutoRun");
+      function renderAutoRun(stateStr) {
+        const s = stateStr === "armed" || stateStr === "lit" ? stateStr : "off";
+        unit5AutoRunBtn.dataset.state = s;
+      }
+      unit5AutoRunBtn.addEventListener("click", function () {
+        // off の場合はサーバー側で無視される（暗室座標未入力＝走行対象なし）。
+        client.send({ type: "unit5_auto_run_toggle" });
+      });
 
       function renderTasks(tasks) {
         RC.renderTasks(taskList, tasks, roomUnits);
@@ -750,7 +811,6 @@
 
       let viewMode = "both"; // "a" = 操作機のみ / "b" = 天カメのみ / "both" = 2画面
       let videoUnitA = 1;
-      let videoMode = "file";
       let webrtcServer = "";
 
       const OVERHEAD_UNIT = 1; // 天カメ = 1号機のカメラ
@@ -775,7 +835,7 @@
         videoUnitLabel.textContent = label;
         mainVideo.classList.toggle("is-dual", viewMode === "both");
         mainVideo.innerHTML = html;
-        RC.initVideos(mainVideo, videoMode, webrtcServer);
+        RC.initVideos(mainVideo, webrtcServer);
         document.querySelectorAll("#keyBanner [data-mode]").forEach(function (el) {
           el.classList.toggle("is-active", el.dataset.mode === viewMode);
         });
@@ -802,16 +862,16 @@
             renderAnalysisTab();
           }
           renderTasks(st.tasks);
+          renderDarkRoom(st.dark_room_coord || null, st.field_side || null);
+          renderAutoRun(st.unit5_auto_run);
           renderUnitSelect(st);
           let needVideo = false;
           if (st.control_operating_unit !== videoUnitA) {
             videoUnitA = st.control_operating_unit;
             needVideo = true;
           }
-          const nextMode = st.video_mode || "file";
           const nextServer = st.webrtc_server || "";
-          if (nextMode !== videoMode || nextServer !== webrtcServer) {
-            videoMode = nextMode;
+          if (nextServer !== webrtcServer) {
             webrtcServer = nextServer;
             needVideo = true;
           }

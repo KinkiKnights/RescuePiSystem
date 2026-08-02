@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ping モニター</title>
+  <link rel="stylesheet" href="/static/common.css" />
+  <style>
+    /* ページ固有スタイル（共通は common.css を使用） */
+    body { overflow: auto; }
+    .app { height: 100vh; height: 100dvh; }
+
+    .pm-header__right {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      flex-wrap: wrap;
+    }
+    .pm-legend { display: flex; gap: 0.9rem; font-size: 0.78rem; }
+    .pm-legend .dot {
+      display: inline-block;
+      width: 11px; height: 11px;
+      border-radius: 3px;
+      margin-right: 5px;
+      vertical-align: -1px;
+    }
+    .pm-legend .dot.on  { background: var(--ok); }
+    .pm-legend .dot.off { background: var(--warn); }
+    .pm-back {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-decoration: none;
+      border: 1px solid var(--border);
+      padding: 0.25rem 0.6rem;
+      background: var(--bg);
+    }
+    .pm-back:hover { background: var(--surface2); color: var(--text); }
+    .icon-btn {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); cursor: pointer;
+      padding: 0.25rem 0.4rem; line-height: 0;
+      display: inline-flex; align-items: center;
+    }
+    .icon-btn:hover { color: var(--text); background: var(--surface2); }
+
+    .pm-main {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 8px;
+    }
+
+    #grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      grid-auto-rows: 1fr;
+      gap: 8px;
+      min-height: 0;
+    }
+    @media (max-width: 900px) {
+      #grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 560px) {
+      #grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .cell {
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+      color: #ffffff;
+      overflow: hidden;
+      min-height: 92px;
+      transition: background-color 0.4s ease;
+    }
+    .cell.online  { background: #1fa84a; }
+    .cell.offline { background: #d17a1c; }
+    .cell.unknown { background: var(--surface2); color: var(--muted); }
+
+    .cell .name {
+      font-size: clamp(14px, 1.6vw, 20px);
+      font-weight: 700;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .cell .ip {
+      font-size: clamp(12px, 1.1vw, 15px);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      opacity: 0.92;
+    }
+    .cell .status {
+      font-size: clamp(13px, 1.2vw, 16px);
+      font-weight: 600;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .cell .status .ind {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: rgba(255, 255, 255, 0.95);
+    }
+    .cell.unknown .status .ind { background: var(--muted); }
+
+    /* 状態が変わったセルは数秒間明滅する */
+    .cell.blink { animation: pmBlink 0.7s ease-in-out infinite; }
+    @keyframes pmBlink {
+      0%, 100% { filter: brightness(1); }
+      50%      { filter: brightness(1.7); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85); }
+    }
+
+    /* ===== 設定モーダル（common.css の modal-backdrop を利用） ===== */
+    .pm-modal { width: min(720px, 94vw); display: flex; flex-direction: column; }
+    .pm-modal__body { padding: 16px; overflow-y: auto; }
+    .pm-modal__foot {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface2);
+    }
+    .settings-row { display: flex; gap: 18px; margin-bottom: 16px; flex-wrap: wrap; }
+    .settings-row label, .dev-row label {
+      display: flex; flex-direction: column; gap: 4px;
+      font-size: 0.78rem; color: var(--muted);
+    }
+    .settings-row input { width: 120px; }
+    input[type="text"], input[type="number"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 9px;
+      font-size: 0.85rem;
+      font-family: inherit;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .dev-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 0.78rem; color: var(--muted); margin-bottom: 8px;
+    }
+    .dev-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .dev-row {
+      display: grid;
+      grid-template-columns: 28px 1fr 1fr 32px;
+      gap: 8px; align-items: center;
+    }
+    .dev-row .num { font-size: 0.72rem; color: var(--muted); text-align: right; }
+    .dev-row input { width: 100%; }
+    .dev-row .del {
+      background: transparent; border: 1px solid var(--border); color: var(--danger);
+      cursor: pointer; font-size: 0.95rem; padding: 4px;
+    }
+    .dev-row .del:hover { background: rgba(232, 93, 93, 0.15); }
+    .btn-inline {
+      width: auto; display: inline-block;
+      padding: 0.5rem 1rem; font-size: 0.82rem;
+    }
+    .btn-primary {
+      width: auto; display: inline-block;
+      padding: 0.5rem 1rem; font-size: 0.82rem; font-weight: 700;
+      color: #fff; background: var(--accent); border: 1px solid var(--accent);
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: #4a8ac4; }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .modal-error {
+      color: #f0a5a0; font-size: 0.8rem; margin: 10px 0 0;
+      background: rgba(232, 93, 93, 0.12); padding: 8px 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="app-header__title">Ping モニター</h1>
+      <div class="pm-header__right">
+        <span class="app-header__meta" id="meta">読み込み中…</span>
+        <span class="pm-legend">
+          <span><span class="dot on"></span>接続</span>
+          <span><span class="dot off"></span>未接続</span>
+        </span>
+        <button id="settingsBtn" class="icon-btn" title="設定（監視対象を編集）" aria-label="設定">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+        <a class="pm-back" href="/">← 一覧へ</a>
+      </div>
+    </header>
+
+    <main class="app-main pm-main">
+      <div id="grid"></div>
+    </main>
+  </div>
+
+  <!-- 設定モーダル -->
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="modal pm-modal">
+      <div class="modal__head">
+        <h2>監視対象の設定</h2>
+        <p class="modal__hint"><code>ping_devices.json</code> を編集します（サーバー再起動不要）。</p>
+      </div>
+      <div class="pm-modal__body">
+        <div class="settings-row">
+          <label>更新間隔 (秒)
+            <input type="number" id="intervalInput" min="1" max="3600" step="1" />
+          </label>
+          <label>タイムアウト (秒)
+            <input type="number" id="timeoutInput" min="1" max="60" step="1" />
+          </label>
+        </div>
+        <div class="dev-head">
+          <span>機器一覧（横5×縦4＝20台を推奨）</span>
+          <span id="devCount"></span>
+        </div>
+        <div id="devList" class="dev-list"></div>
+        <button id="addRowBtn" class="btn btn-inline">＋ 機器を追加</button>
+        <p id="modalError" class="modal-error" hidden></p>
+      </div>
+      <div class="pm-modal__foot">
+        <button id="cancelBtn" class="btn btn-inline">キャンセル</button>
+        <button id="saveBtn" class="btn-primary">保存して反映</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const POLL_MS = 2000;   // 状態を取得する間隔
+    const BLINK_MS = 5000;  // 状態変化時に明滅させる時間
+
+    const gridEl = document.getElementById("grid");
+    const metaEl = document.getElementById("meta");
+
+    const prevOnline = new Map(); // key -> boolean
+    const blinkUntil = new Map(); // key -> timestamp(ms)
+    const cells = new Map();      // key -> element
+
+    function keyOf(d) { return d.ip + "|" + d.name; }
+
+    function render(devices) {
+      if (gridEl.childElementCount !== devices.length) {
+        gridEl.innerHTML = "";
+        cells.clear();
+      }
+      devices.forEach((d) => {
+        const key = keyOf(d);
+        let cell = cells.get(key);
+        if (!cell) {
+          cell = document.createElement("div");
+          cell.className = "cell unknown";
+          cell.innerHTML =
+            '<div class="name"></div>' +
+            '<div class="ip"></div>' +
+            '<div class="status"><span class="ind"></span><span class="txt"></span></div>';
+          gridEl.appendChild(cell);
+          cells.set(key, cell);
+        }
+        const isUnknown = (d.online === null || d.online === undefined);
+        cell.querySelector(".name").textContent = d.name || "(名称未設定)";
+        cell.querySelector(".ip").textContent = d.ip || "";
+        cell.querySelector(".txt").textContent =
+          isUnknown ? "確認中…" : (d.online ? "接続" : "未接続");
+
+        const prev = prevOnline.get(key);
+        if (typeof prev === "boolean" && typeof d.online === "boolean" && prev !== d.online) {
+          blinkUntil.set(key, Date.now() + BLINK_MS);
+        }
+        if (typeof d.online === "boolean") prevOnline.set(key, d.online);
+
+        cell.classList.toggle("online", d.online === true);
+        cell.classList.toggle("offline", d.online === false);
+        cell.classList.toggle("unknown", isUnknown);
+      });
+      updateBlink();
+    }
+
+    function updateBlink() {
+      const now = Date.now();
+      cells.forEach((cell, key) => {
+        const until = blinkUntil.get(key) || 0;
+        cell.classList.toggle("blink", now < until);
+      });
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/ping/status", { cache: "no-store" });
+        const data = await res.json();
+        render(data.devices || []);
+        if (data.updated) {
+          const t = new Date(data.updated * 1000);
+          metaEl.textContent = "最終更新: " + t.toLocaleTimeString("ja-JP") +
+            "（機器 " + (data.devices ? data.devices.length : 0) + " 台）";
+        }
+      } catch (e) {
+        metaEl.textContent = "サーバーに接続できません…";
+      }
+    }
+
+    // ===== 設定モーダル =====
+    const modal = document.getElementById("modal");
+    const devListEl = document.getElementById("devList");
+    const devCountEl = document.getElementById("devCount");
+    const intervalInput = document.getElementById("intervalInput");
+    const timeoutInput = document.getElementById("timeoutInput");
+    const errEl = document.getElementById("modalError");
+    const saveBtn = document.getElementById("saveBtn");
+
+    let polling = true;
+
+    function addRow(name = "", ip = "") {
+      const row = document.createElement("div");
+      row.className = "dev-row";
+      row.innerHTML =
+        '<span class="num"></span>' +
+        '<input type="text" class="r-name" placeholder="機器名称" />' +
+        '<input type="text" class="r-ip" placeholder="IPアドレス / ホスト名" />' +
+        '<button class="del" title="削除">✕</button>';
+      row.querySelector(".r-name").value = name;
+      row.querySelector(".r-ip").value = ip;
+      row.querySelector(".del").addEventListener("click", () => { row.remove(); renumber(); });
+      devListEl.appendChild(row);
+      renumber();
+    }
+
+    function renumber() {
+      const rows = devListEl.querySelectorAll(".dev-row");
+      rows.forEach((r, i) => { r.querySelector(".num").textContent = (i + 1); });
+      devCountEl.textContent = rows.length + " 台";
+    }
+
+    async function openModal() {
+      errEl.hidden = true;
+      try {
+        const res = await fetch("/api/ping/config", { cache: "no-store" });
+        const cfg = await res.json();
+        intervalInput.value = cfg.interval_sec;
+        timeoutInput.value = cfg.ping_timeout_sec;
+        devListEl.innerHTML = "";
+        (cfg.devices || []).forEach((d) => addRow(d.name, d.ip));
+        if (!cfg.devices || cfg.devices.length === 0) addRow();
+        polling = false;
+        modal.hidden = false;
+      } catch (e) {
+        alert("設定の読み込みに失敗しました。");
+      }
+    }
+
+    function closeModal() { modal.hidden = true; polling = true; }
+
+    async function saveConfig() {
+      errEl.hidden = true;
+      const devices = [];
+      devListEl.querySelectorAll(".dev-row").forEach((r) => {
+        const name = r.querySelector(".r-name").value.trim();
+        const ip = r.querySelector(".r-ip").value.trim();
+        if (ip) devices.push({ name, ip });
+      });
+      const cfg = {
+        interval_sec: Number(intervalInput.value),
+        ping_timeout_sec: Number(timeoutInput.value),
+        devices,
+      };
+      saveBtn.disabled = true;
+      try {
+        const res = await fetch("/api/ping/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cfg),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "保存に失敗しました");
+        closeModal();
+        poll();
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.hidden = false;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    document.getElementById("settingsBtn").addEventListener("click", openModal);
+    document.getElementById("cancelBtn").addEventListener("click", closeModal);
+    document.getElementById("addRowBtn").addEventListener("click", () => addRow());
+    saveBtn.addEventListener("click", saveConfig);
+    modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.hidden) closeModal();
+    });
+
+    setInterval(() => { if (polling) poll(); }, POLL_MS);
+    setInterval(updateBlink, 300);
+    poll();
+  </script>
+</body>
+</html>

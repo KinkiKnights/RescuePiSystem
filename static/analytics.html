@@ -324,6 +324,13 @@
       <aside class="col col--left panel">
         <h2 class="panel-title">タスク進行状況</h2>
         <div class="task-list" id="taskList"></div>
+        <div class="dark-room">
+          <h2 class="panel-title">暗室座標（エンジニア指定）</h2>
+          <div class="field-map" id="darkRoomMap"></div>
+          <div class="dark-room__foot">
+            <span class="dark-room__coord" id="darkRoomCoord">未設定</span>
+          </div>
+        </div>
       </aside>
 
       <section class="col panel">
@@ -333,7 +340,7 @@
           <div class="view view--target" data-view="target" id="viewTarget"></div>
           <div class="view view--audio" data-view="audio" id="viewAudio">
             <span class="view--audio__label">音声解析</span>
-            <iframe src="/static/audio_analyzer.html" title="音声解析ツール"></iframe>
+            <iframe id="audioFrame" title="音声解析ツール"></iframe>
           </div>
           <div class="ph" id="phTen">天カメ</div>
           <div class="ph" id="phTarget">対象機</div>
@@ -409,31 +416,66 @@
       const stage = document.getElementById("stage");
       const viewTen = document.getElementById("viewTen");
       const viewTarget = document.getElementById("viewTarget");
+      const viewAudio = document.getElementById("viewAudio");
+      const audioFrame = document.getElementById("audioFrame");
       const unitBar = document.getElementById("unitBar");
       const roomTabs = document.getElementById("roomTabs");
 
       let roomUnits = { A: 4, B: 3, C: 5 };
       const showNotification = RC.createNotifier(notifyBar, notifyText);
+
+      /* 暗室座標（読み取り専用マップ・エンジニアが指定した位置を共有表示） */
+      const darkRoomCoordEl = document.getElementById("darkRoomCoord");
+      const darkRoomMap = RC.createFieldMap(document.getElementById("darkRoomMap"), {});
+      function renderDarkRoom(coord, side) {
+        darkRoomMap.setCoord(coord);
+        darkRoomMap.setSide(side || null);
+        darkRoomCoordEl.textContent = RC.formatCoord(coord);
+      }
       let currentTargetUnit = 0;
       let pendingRequestUnit = 0;
-      let videoMode = "file";
       let webrtcServer = "";
 
       /* 天カメ（1号機）は一度だけ構築。複製せず同一要素を CSS で移動 */
       viewTen.innerHTML = RC.videoBox(1, "", { label: "天カメ（1号機）" });
-      RC.initVideos(viewTen, videoMode, webrtcServer);
+      RC.initVideos(viewTen, webrtcServer);
 
       function renderTargetVideo(unit) {
         if (unit === currentTargetUnit) return;
         currentTargetUnit = unit;
         viewTarget.innerHTML = RC.videoBox(unit, "", { label: "対象機（" + unit + "号機）" });
-        RC.initVideos(viewTarget, videoMode, webrtcServer);
+        RC.initVideos(viewTarget, webrtcServer);
       }
 
-      // 映像モード/中継先が変わったら、天カメ・対象機の両方を貼り直す
+      /* 音声解析：号機ごとに damiyan 検出器の Web ビューアを iframe 埋め込み。
+         号機3/4/5 のみ検出器があり、それぞれ :8771/:8772/:8773 で待ち受ける。
+         リモートPC のブラウザからも見えるよう location.hostname を使う（damiyan は
+         --web-host 0.0.0.0 で LAN 公開されている前提）。号機1/2 は検出器が無いので
+         音声解析ビュー自体を隠す。 */
+      const AUDIO_PORT = { 3: 8771, 4: 8772, 5: 8773 };
+      // 初期値は未確定を表す undefined。null（＝検出器なし）とも数値とも異なるので
+      // 初回 applyState では必ず下の分岐が走り、DOM を正しい状態に初期化する。
+      let currentAudioPort;
+      function updateAudioFrame(unit) {
+        const port = AUDIO_PORT[unit] || null;
+        if (port === currentAudioPort) return; // 変化なし → 再読込しない
+        currentAudioPort = port;
+        if (port) {
+          audioFrame.src = "http://" + location.hostname + ":" + port + "/";
+          viewAudio.style.display = "";
+        } else {
+          // 検出器の無い号機（1/2）：フレームを隠し、読み込みも止める
+          audioFrame.removeAttribute("src");
+          viewAudio.style.display = "none";
+          // 音声解析が中央メインに選択されていたら対象機ビューへ退避（レイアウト崩れ防止）
+          if (stage.dataset.sel === "audio") stage.dataset.sel = "target";
+        }
+      }
+
+      // 中継先が変わったら、天カメ・対象機の両方を貼り直す
       function applyVideoMode() {
-        RC.initVideos(viewTen, videoMode, webrtcServer);
-        RC.initVideos(viewTarget, videoMode, webrtcServer);
+        RC.initVideos(viewTen, webrtcServer);
+        RC.initVideos(viewTarget, webrtcServer);
       }
 
       /* ビュー選択：選ばれたものを中央へ（CSS grid-area で移動） */
@@ -620,16 +662,16 @@
         roomUnits = st.room_units || roomUnits;
         showNotification(st.notification);
         renderTasks(st.tasks);
+        renderDarkRoom(st.dark_room_coord || null, st.field_side || null);
 
         const unit = st.analytics_target_unit || 1;
         selectedUnit = unit;
         renderUnitBar(st.units || {});
         renderTargetVideo(unit);
+        updateAudioFrame(unit);
 
-        const nextMode = st.video_mode || "file";
         const nextServer = st.webrtc_server || "";
-        if (nextMode !== videoMode || nextServer !== webrtcServer) {
-          videoMode = nextMode;
+        if (nextServer !== webrtcServer) {
           webrtcServer = nextServer;
           applyVideoMode();
         }

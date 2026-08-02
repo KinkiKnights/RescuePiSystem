@@ -18,55 +18,18 @@
       .replace(/"/g, "&quot;");
   }
 
-  function videoFileUrl(filename) {
-    return "/video/" + encodeURIComponent(filename);
-  }
-
-  function unitVideoUrl(unit) {
-    const n = Number(unit);
-    if (!(n >= 1 && n <= 5)) return null;
-    return videoFileUrl(n + "号機.mp4");
-  }
-
-  function overviewVideoUrl() {
-    return videoFileUrl("全体カメラ.mp4");
-  }
-
   function videoBox(unitOrOverview, extraClass, opts) {
     opts = opts || {};
     const cls = extraClass ? " " + extraClass : "";
     const isOverview =
       unitOrOverview === "overview" || opts.kind === "overview";
-    let label;
-    let src;
-
-    if (isOverview) {
-      label = opts.label || "全体カメラ";
-      src = overviewVideoUrl();
-    } else {
-      const n = Number(unitOrOverview) || 1;
-      label = opts.label || n + "号機";
-      src = unitVideoUrl(n);
-    }
+    const label = isOverview
+      ? opts.label || "全体カメラ"
+      : opts.label || (Number(unitOrOverview) || 1) + "号機";
 
     const dataUnit = isOverview ? ' data-unit="overview"' : ' data-unit="' + Number(unitOrOverview || 1) + '"';
 
-    if (!src) {
-      return (
-        '<div class="video-box' +
-        cls +
-        '"' +
-        dataUnit +
-        '">' +
-        '<span class="video-box__label">' +
-        escapeHtml(label) +
-        "</span>" +
-        '<span class="video-box__placeholder">映像<br>No Connect</span>' +
-        "</div>"
-      );
-    }
-
-    // src は initVideos / attachVideo がモード(file/webrtc)に応じて後付けする
+    // 映像ソースは WebRTC（実機カメラ）。src は initVideos / attachVideo が後付けする。
     return (
       '<div class="video-box' +
       cls +
@@ -76,7 +39,7 @@
       '<span class="video-box__label">' +
       escapeHtml(label) +
       "</span>" +
-      '<video loop muted autoplay playsinline></video>' +
+      '<video muted autoplay playsinline></video>' +
       '<span class="video-box__placeholder" hidden>映像<br>No Connect</span>' +
       "</div>"
     );
@@ -114,14 +77,13 @@
   }
 
   // 1つの <video> に映像ソースを割り当てる。
-  //  mode="file"  : video/<号機>.mp4 をループ再生（従来動作）
-  //  mode="webrtc": WebRTCCamera で RES<号機> に接続（号機1〜5のみ。overview等は file にフォールバック）
-  function attachVideo(video, mode, server) {
+  // 映像ソースは WebRTC（実機カメラ中継）。号機 1〜5 → カメラ ID KK01〜KK05。
+  // 号機以外（overview 等）は WebRTC 非対応のため「No Connect」表示のまま。
+  function attachVideo(video, server) {
     const box = video.closest(".video-box");
     const placeholder = box && box.querySelector(".video-box__placeholder");
     const du = box ? box.getAttribute("data-unit") : null;
-    const isOverview = du === "overview";
-    const unitNum = isOverview ? null : Number(du);
+    const unitNum = du === "overview" ? null : Number(du);
 
     // 既存のWebRTC接続を破棄
     if (video._rtc) {
@@ -129,35 +91,9 @@
       video._rtc = null;
     }
 
-    function showFile() {
-      const src = isOverview ? overviewVideoUrl() : unitVideoUrl(unitNum);
-      video.srcObject = null;
-      video.loop = true;
-      video.muted = true;
-      if (!src) {
-        video.hidden = true;
-        if (placeholder) placeholder.hidden = false;
-        return;
-      }
-      video.hidden = false;
-      if (placeholder) placeholder.hidden = true;
-      video.src = src;
-      video.addEventListener(
-        "error",
-        function () {
-          video.hidden = true;
-          if (placeholder) placeholder.hidden = false;
-        },
-        { once: true }
-      );
-      // src を JS で後付けすると autoplay 属性が発火しないため、
-      // 再生可能になった時点で明示的に play() する。
-      video.addEventListener("canplay", function () { _tryPlay(video); }, { once: true });
-      _tryPlay(video);
-    }
-
-    if (mode === "webrtc" && unitNum >= 1 && unitNum <= 5 && global.WebRTCCamera) {
+    if (unitNum >= 1 && unitNum <= 5 && global.WebRTCCamera) {
       video.loop = false;
+      video.srcObject = null;
       video.removeAttribute("src");
       video.hidden = false;
       if (placeholder) placeholder.hidden = false; // 接続するまでは「No Connect」表示
@@ -172,20 +108,22 @@
         },
       });
       video._rtc = cam;
-      cam.connect(video, "RES" + unitNum);
+      cam.connect(video, "KK" + String(unitNum).padStart(2, "0"));
       _tryPlay(video);
     } else {
-      showFile();
+      // WebRTC 対象外（号機以外）は信号なし表示
+      video.srcObject = null;
+      video.removeAttribute("src");
+      video.hidden = true;
+      if (placeholder) placeholder.hidden = false;
     }
   }
 
-  // root 配下の全 .video-box video にソースを割り当てる。
-  // mode 省略時は "file"（従来呼び出しと互換）。
-  function initVideos(root, mode, server) {
+  // root 配下の全 .video-box video に WebRTC ソースを割り当てる。
+  function initVideos(root, server) {
     const scope = root || document;
-    const m = mode || "file";
     scope.querySelectorAll(".video-box video").forEach(function (video) {
-      attachVideo(video, m, server);
+      attachVideo(video, server);
     });
   }
 
@@ -325,6 +263,107 @@
     el.textContent = labels[status] || status;
   }
 
+  /* ---------- 暗室座標マップ（全モード共有） ----------
+     フィールドは 1800×1800mm の「全面暗室」（正方形）。それを模した自作 SVG
+     （外部アセット・通信なし）。座標はマップ表面に対する 0..1 正規化値（x,y）で
+     保持し、画面サイズやモードに依存せず同じ位置にマーカーを描ける（ワイヤ契約は
+     正規化値のまま。表示のみ mm 換算する→ formatCoord）。engineer は
+     interactive:true でクリック指定、他モードは読み取り専用でマーカーのみ表示する。
+     入口はマスターが選ぶ field_side（"red"/"blue"/null）で辺上に描く。 */
+  const FIELD_MAP_VB = 200; // 正方形 viewBox（1800×1800mm を表す論理座標）
+  const FIELD_MM = 1800;    // 実フィールド寸法(mm)。表示の mm 換算にのみ使用
+
+  function createFieldMap(containerEl, opts) {
+    opts = opts || {};
+    containerEl.classList.add("field-map");
+    if (opts.interactive) containerEl.classList.add("field-map--interactive");
+    const VB = FIELD_MAP_VB;
+    containerEl.innerHTML =
+      '<svg class="field-map__svg" viewBox="0 0 ' + VB + " " + VB +
+      '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' +
+        '<rect class="fm-field" x="1" y="1" width="' + (VB - 2) + '" height="' + (VB - 2) + '"/>' +
+        '<g class="fm-entrance"></g>' +
+        '<g class="fm-marker" hidden>' +
+          '<line class="fm-marker__cross" x1="-11" y1="0" x2="11" y2="0"/>' +
+          '<line class="fm-marker__cross" x1="0" y1="-11" x2="0" y2="11"/>' +
+          '<circle class="fm-marker__dot" cx="0" cy="0" r="6"/>' +
+          '<text class="fm-marker__tag" x="10" y="-10">暗室</text>' +
+        "</g>" +
+      "</svg>";
+    const svg = containerEl.querySelector("svg");
+    const marker = containerEl.querySelector(".fm-marker");
+    const entrance = containerEl.querySelector(".fm-entrance");
+
+    function setCoord(coord) {
+      if (coord && typeof coord.x === "number" && typeof coord.y === "number") {
+        const px = coord.x * VB;
+        const py = coord.y * VB;
+        marker.setAttribute("transform", "translate(" + px + "," + py + ")");
+        marker.removeAttribute("hidden");
+      } else {
+        marker.setAttribute("hidden", "");
+      }
+    }
+
+    // 入口「入口」を辺上に描く。SVG 原点は左上なので「下半分」は y 大きい側。
+    //   side==="red"  → 右辺の下半分
+    //   side==="blue" → 左辺の下半分
+    //   それ以外(null) → 入口なし
+    function setSide(side) {
+      const seg = 8;          // 入口帯の太さ
+      const y0 = VB / 2;      // 下半分の開始 y
+      const ty = VB * 0.75;   // 入口ラベルの y（下半分の中央）
+      let html = "";
+      if (side === "red") {
+        html =
+          '<rect class="fm-entrance__seg fm-entrance__seg--red" x="' + (VB - seg) +
+          '" y="' + y0 + '" width="' + seg + '" height="' + (VB - y0) + '"/>' +
+          '<text class="fm-entrance__tag" x="' + (VB - seg - 4) + '" y="' + ty +
+          '" text-anchor="end">入口</text>';
+      } else if (side === "blue") {
+        html =
+          '<rect class="fm-entrance__seg fm-entrance__seg--blue" x="0" y="' + y0 +
+          '" width="' + seg + '" height="' + (VB - y0) + '"/>' +
+          '<text class="fm-entrance__tag" x="' + (seg + 4) + '" y="' + ty +
+          '" text-anchor="start">入口</text>';
+      }
+      entrance.innerHTML = html;
+    }
+
+    if (opts.interactive && typeof opts.onPick === "function") {
+      svg.addEventListener("click", function (e) {
+        const rect = svg.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        // 要素のアスペクト比は CSS で viewBox(1:1) に固定してあるため、
+        // 要素内の相対位置がそのまま 0..1 正規化座標になる。
+        let x = (e.clientX - rect.left) / rect.width;
+        let y = (e.clientY - rect.top) / rect.height;
+        x = Math.min(1, Math.max(0, x));
+        y = Math.min(1, Math.max(0, y));
+        opts.onPick({ x: x, y: y });
+      });
+    }
+
+    setSide(opts.side || null); // 初期 side を反映
+
+    return { setCoord: setCoord, setSide: setSide };
+  }
+
+  // 正規化座標を mm 表記にする（未設定は "未設定"）。
+  // フィールドは 1800×1800mm。ワイヤ/保存値は正規化 0..1 のままで、表示だけ mm 換算。
+  // 例: "x 1234 ／ y 567 mm（正規化 0.686, 0.315）"
+  function formatCoord(coord) {
+    if (!coord || typeof coord.x !== "number" || typeof coord.y !== "number") {
+      return "未設定";
+    }
+    const xmm = Math.round(coord.x * FIELD_MM);
+    const ymm = Math.round(coord.y * FIELD_MM);
+    return (
+      "x " + xmm + " ／ y " + ymm + " mm（正規化 " +
+      coord.x.toFixed(3) + ", " + coord.y.toFixed(3) + "）"
+    );
+  }
+
   /* ---------- 共有定数 ---------- */
 
   const ROOM_NAMES = { A: "広場", B: "暗室", C: "2階" };
@@ -436,6 +475,8 @@
     renderTasks: renderTasks,
     createNotifier: createNotifier,
     createQrScanner: createQrScanner,
+    createFieldMap: createFieldMap,
+    formatCoord: formatCoord,
     formatAgo: formatAgo,
     ROOM_NAMES: ROOM_NAMES,
     COLOR_OPTIONS: COLOR_OPTIONS,

@@ -43,6 +43,27 @@
       text-align: center;
     }
 
+    .rp-darkroom {
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .rp-darkroom__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .rp-darkroom__head span {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+    }
+    .rp-darkroom .field-map { max-width: 220px; padding: 0 6px 6px; }
+
     .rooms {
       flex: 1;
       min-height: 0;
@@ -239,6 +260,10 @@
       <span class="conn-badge connecting" id="connBadge">接続中…</span>
     </header>
     <p class="rp-hint">各項目を右スワイプで「報告済み」・左スワイプで解除</p>
+    <section class="rp-darkroom">
+      <div class="rp-darkroom__head">暗室座標（エンジニア指定・共有）<span id="darkRoomCoord">未設定</span></div>
+      <div class="field-map" id="darkRoomMap"></div>
+    </section>
     <main class="rooms" id="roomsRoot" aria-label="ルーム別 報告状況"></main>
     <div class="send-bar">
       <input id="notifyInput" type="text" placeholder="コントロールへ通知送信…" />
@@ -267,6 +292,10 @@
       const connBadge = document.getElementById("connBadge");
       const roomsRoot = document.getElementById("roomsRoot");
       const notifyInput = document.getElementById("notifyInput");
+
+      /* 暗室座標（読み取り専用マップ・エンジニアが指定した位置を共有表示） */
+      const darkRoomCoordEl = document.getElementById("darkRoomCoord");
+      const darkRoomMap = RC.createFieldMap(document.getElementById("darkRoomMap"), {});
 
       function esc(s) { return RC.escapeHtml(s); }
 
@@ -380,6 +409,10 @@
       function applyState(st) {
         if (st.room_units) roomUnits = st.room_units;
         if (st.room_analysis) roomAnalysis = st.room_analysis;
+        const drc = st.dark_room_coord || null;
+        darkRoomMap.setCoord(drc);
+        darkRoomMap.setSide(st.field_side || null);
+        darkRoomCoordEl.textContent = RC.formatCoord(drc);
         ROOMS.forEach(function (r) {
           const a = roomAnalysis[r] || emptyA();
           KEYS.forEach(function (k) {

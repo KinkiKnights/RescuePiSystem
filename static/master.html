@@ -48,6 +48,16 @@
       border-color: #2f8f46;
       color: #ffffff;
     }
+    .field-side-btn.is-active--red {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #ffffff;
+    }
+    .field-side-btn.is-active--blue {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
     .relay-row { display: flex; gap: 6px; margin-top: 6px; }
     .relay-row input {
       flex: 1;
@@ -91,6 +101,16 @@
       background: var(--bg);
       border: 1px solid var(--border);
     }
+    .unit-ip-row__value {
+      flex: 1;
+      min-width: 0;
+      padding: 0.45rem 0.6rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -101,16 +121,12 @@
     </header>
     <main class="master-main">
       <section>
-        <h2 class="section-title">映像ソース（全画面）</h2>
-        <div class="btn-grid">
-          <button type="button" class="btn" data-video-mode="file">動画ファイル</button>
-          <button type="button" class="btn" data-video-mode="webrtc">WebRTC（実機カメラ）</button>
-        </div>
+        <h2 class="section-title">映像（WebRTC 実機カメラ・全画面）</h2>
         <div class="relay-row">
           <input id="relayInput" type="text" placeholder="中継先（例: 192.168.1.50 / ws://host:8080/ws）空欄で自動" />
           <button type="button" class="btn" id="relaySet">中継先を設定</button>
         </div>
-        <p class="video-mode-hint" id="videoModeHint">現在: 動画ファイル（1〜5号機 → カメラID RES1〜RES5）</p>
+        <p class="video-mode-hint" id="videoModeHint">映像ソースは WebRTC（実機カメラ中継）。1〜5号機 → カメラID KK01〜KK05</p>
       </section>
       <section>
         <h2 class="section-title">デモ（報告者モード撮影用）</h2>
@@ -147,17 +163,30 @@
         </div>
       </section>
       <section>
-        <h2 class="section-title">号機 IP アドレス（joy_node_web 接続先）</h2>
+        <h2 class="section-title">号機 IP アドレス（joy_node_web 接続先・固定）</h2>
         <div class="unit-ip-table" id="unitIpTable">
-          <div class="unit-ip-row"><span class="unit-ip-row__label">1号機</span><input type="text" data-unit-ip="1" placeholder="192.168.x.x"></div>
-          <div class="unit-ip-row"><span class="unit-ip-row__label">2号機</span><input type="text" data-unit-ip="2" placeholder="192.168.x.x"></div>
-          <div class="unit-ip-row"><span class="unit-ip-row__label">3号機</span><input type="text" data-unit-ip="3" placeholder="192.168.x.x"></div>
-          <div class="unit-ip-row"><span class="unit-ip-row__label">4号機</span><input type="text" data-unit-ip="4" placeholder="192.168.x.x"></div>
-          <div class="unit-ip-row"><span class="unit-ip-row__label">5号機</span><input type="text" data-unit-ip="5" placeholder="192.168.x.x"></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">1号機</span><span class="unit-ip-row__value" data-unit-ip="1">—</span></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">2号機</span><span class="unit-ip-row__value" data-unit-ip="2">—</span></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">3号機</span><span class="unit-ip-row__value" data-unit-ip="3">—</span></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">4号機</span><span class="unit-ip-row__value" data-unit-ip="4">—</span></div>
+          <div class="unit-ip-row"><span class="unit-ip-row__label">5号機</span><span class="unit-ip-row__value" data-unit-ip="5">—</span></div>
         </div>
-        <div class="relay-row" style="margin-top:6px">
-          <button type="button" class="btn btn--wide" id="unitIpsSave" style="flex:1">IPアドレスを保存</button>
+        <p class="video-mode-hint">号機 IP は <code>config.json</code> で固定設定されており、この画面からは変更できません。</p>
+      </section>
+      <section>
+        <h2 class="section-title">フィールド陣営（赤／青・全モード共有）</h2>
+        <div class="btn-grid">
+          <button type="button" class="btn field-side-btn" data-field-side="red">赤フィールド</button>
+          <button type="button" class="btn field-side-btn" data-field-side="blue">青フィールド</button>
+          <button type="button" class="btn btn--wide" data-field-side="clear">選択を解除</button>
         </div>
+        <p class="video-mode-hint">選択した陣営を全モードのマップに反映します。赤＝入口は右辺の下半分、青＝入口は左辺の下半分に「入口」を描画します。</p>
+      </section>
+      <section>
+        <h2 class="section-title">暗室座標（エンジニア指定・全モード共有）</h2>
+        <div class="field-map" id="darkRoomMap"></div>
+        <p class="video-mode-hint" id="darkRoomCoord">未設定</p>
+        <p class="video-mode-hint">エンジニアモードでマップをクリックして指定した暗室位置を全モードで共有表示します。フィールドは 1800×1800mm の全面暗室で、座標は mm 表示（内部は 0〜1 正規化値で保持）。</p>
       </section>
       <section>
         <h2 class="section-title">コントロール — タスク</h2>
@@ -235,29 +264,48 @@
       const relayInput = document.getElementById("relayInput");
       const videoModeHint = document.getElementById("videoModeHint");
 
+      /* 暗室座標（読み取り専用マップ・エンジニアが指定した位置を共有表示） */
+      const darkRoomCoordEl = document.getElementById("darkRoomCoord");
+      const darkRoomMap = RC.createFieldMap(document.getElementById("darkRoomMap"), {});
+
       const client = RC.createWsClient("master", {
         onStatus: function (s) {
           RC.setConnBadge(connBadge, s);
         },
         onState: function (st) {
-          const mode = st.video_mode || "file";
           const server = st.webrtc_server || "";
-          document.querySelectorAll("[data-video-mode]").forEach(function (b) {
-            b.classList.toggle("is-active", b.dataset.videoMode === mode);
-          });
           videoModeHint.textContent =
-            "現在: " +
-            (mode === "webrtc" ? "WebRTC（実機カメラ）" : "動画ファイル") +
-            "（1〜5号機 → カメラID RES1〜RES5）" +
+            "映像ソースは WebRTC（実機カメラ中継）。1〜5号機 → カメラID KK01〜KK05" +
             (server ? "　中継: " + server : "");
           if (document.activeElement !== relayInput && server) relayInput.value = server;
+          // 号機 IP は config.json 固定・読み取り専用表示
           const ips = st.unit_ips || {};
-          document.querySelectorAll("[data-unit-ip]").forEach(function (inp) {
-            if (document.activeElement !== inp) {
-              inp.value = ips[inp.dataset.unitIp] || "";
-            }
+          document.querySelectorAll("[data-unit-ip]").forEach(function (el) {
+            el.textContent = ips[el.dataset.unitIp] || "—";
+          });
+          // 暗室座標（エンジニア指定）を読み取り専用マップへ反映
+          const coord = st.dark_room_coord || null;
+          darkRoomMap.setCoord(coord);
+          darkRoomMap.setSide(st.field_side || null);
+          darkRoomCoordEl.textContent = RC.formatCoord(coord);
+          // フィールド陣営の選択状態をボタンへ反映
+          const side = st.field_side || null;
+          document.querySelectorAll(".field-side-btn").forEach(function (b) {
+            const s = b.dataset.fieldSide;
+            b.classList.toggle("is-active--red", side === "red" && s === "red");
+            b.classList.toggle("is-active--blue", side === "blue" && s === "blue");
           });
         },
+      });
+
+      /* ---- フィールド陣営（赤／青）選択：全モードへ共有 ---- */
+      document.querySelectorAll("[data-field-side]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const v = btn.dataset.fieldSide;
+          const side = v === "clear" ? null : v;
+          client.send({ type: "set_field_side", side: side });
+          log("フィールド陣営 → " + (side === "red" ? "赤" : side === "blue" ? "青" : "未選択"));
+        });
       });
 
       function postMaster(body) {
@@ -269,23 +317,6 @@
           log(body.action || JSON.stringify(body));
         });
       }
-
-      document.querySelectorAll("[data-video-mode]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          const mode = btn.dataset.videoMode;
-          postMaster({ action: "set_video_mode", mode: mode });
-          log("映像ソース → " + (mode === "webrtc" ? "WebRTC（実機カメラ）" : "動画ファイル"));
-        });
-      });
-
-      document.getElementById("unitIpsSave").addEventListener("click", function () {
-        const ips = {};
-        document.querySelectorAll("[data-unit-ip]").forEach(function (inp) {
-          ips[inp.dataset.unitIp] = inp.value.trim();
-        });
-        postMaster({ action: "set_unit_ips", unit_ips: ips });
-        log("号機IPアドレスを保存");
-      });
 
       document.getElementById("relaySet").addEventListener("click", function () {
         const v = relayInput.value.trim();
