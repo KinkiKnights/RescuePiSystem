@@ -629,6 +629,16 @@ async def ping_monitor_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "ping-monitor.html")
 
 
+@app.get("/all-monitor")
+async def all_monitor_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "all-monitor.html")
+
+
+@app.get("/control-panel")
+async def control_panel_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "control-panel.html")
+
+
 @app.on_event("startup")
 async def _start_ping_monitor() -> None:
     # ping 監視のバックグラウンドタスクを起動する。

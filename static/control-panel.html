@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>コントロールパネル</title>
+  <link rel="stylesheet" href="/static/common.css" />
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    .cp {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg);
+    }
+    .cp__display {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+      background: #000;
+    }
+    .cp__display iframe {
+      border: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .cp__placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font: 700 1.1rem var(--font);
+      pointer-events: none;
+    }
+    .cp__bar {
+      flex: 0 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .cp__group {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .cp__group-label {
+      font: 700 0.72rem var(--font);
+      color: var(--muted);
+      margin-right: 2px;
+    }
+    .cp__sep {
+      width: 1px;
+      align-self: stretch;
+      background: var(--border);
+      opacity: 0.4;
+      margin: 2px 4px;
+    }
+    .cp__btn {
+      padding: 0.55rem 0.85rem;
+      font: 700 0.9rem var(--font);
+      color: var(--text);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .cp__btn:hover { background: #4a4a52; }
+    .cp__btn:active { background: #55555e; }
+    .cp__btn.is-active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .cp__spacer { flex: 1 1 auto; }
+    .cp__btn--ghost {
+      background: transparent;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .cp__btn--ghost:hover { background: var(--surface2); color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="cp">
+    <div class="cp__display">
+      <div class="cp__placeholder" id="cpPlaceholder">下のボタンから表示する画面を選択してください</div>
+      <iframe id="cpFrame" title="表示画面" allow="autoplay"></iframe>
+    </div>
+    <div class="cp__bar" id="cpBar">
+      <div class="cp__group" id="grpRobots">
+        <span class="cp__group-label">機体</span>
+      </div>
+      <div class="cp__sep"></div>
+      <div class="cp__group" id="grpAudio">
+        <span class="cp__group-label">音声解析</span>
+      </div>
+      <div class="cp__spacer"></div>
+      <button type="button" class="cp__btn cp__btn--ghost" id="cpOpenTab" disabled>現在の画面を別タブで開く</button>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var host = location.hostname;
+      var frame = document.getElementById('cpFrame');
+      var placeholder = document.getElementById('cpPlaceholder');
+      var openTab = document.getElementById('cpOpenTab');
+      var current = null;
+
+      // 機体N -> http://kk0N.local/ (ブラウザ側 mDNS で到達)
+      var robots = [];
+      for (var n = 1; n <= 5; n++) {
+        robots.push({ label: '機体' + n, url: 'http://kk0' + n + '.local/' });
+      }
+      // 音声解析3/4/5 -> このホスト(kkrtx)の :8771/:8772/:8773
+      var audio = [
+        { label: '音声解析3', url: location.protocol + '//' + host + ':8771/' },
+        { label: '音声解析4', url: location.protocol + '//' + host + ':8772/' },
+        { label: '音声解析5', url: location.protocol + '//' + host + ':8773/' }
+      ];
+
+      function activate(btn) {
+        var btns = document.querySelectorAll('.cp__btn');
+        for (var i = 0; i < btns.length; i++) btns[i].classList.remove('is-active');
+        if (btn) btn.classList.add('is-active');
+      }
+
+      function show(url, btn) {
+        current = url;
+        placeholder.style.display = 'none';
+        frame.src = url;
+        activate(btn);
+        openTab.disabled = false;
+      }
+
+      function makeButton(item, group) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cp__btn';
+        b.textContent = item.label;
+        b.addEventListener('click', function () { show(item.url, b); });
+        group.appendChild(b);
+      }
+
+      var grpRobots = document.getElementById('grpRobots');
+      var grpAudio = document.getElementById('grpAudio');
+      robots.forEach(function (r) { makeButton(r, grpRobots); });
+      audio.forEach(function (a) { makeButton(a, grpAudio); });
+
+      // 埋め込みが不安定な場合のフォールバック: 現在の画面を別タブで開く。
+      openTab.addEventListener('click', function () {
+        if (current) window.open(current, '_blank', 'noopener');
+      });
+    })();
+  </script>
+</body>
+</html>
