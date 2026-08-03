@@ -751,11 +751,10 @@ async def post_unit_shutdown() -> Any:
     return await _unit_power_action("shutdown")
 
 
-@app.post("/api/units/shutdown_all")
-async def post_units_shutdown_all() -> Any:
-    """全号機（state.unit_ips の 1..5）を master-control API 経由で一斉シャットダウンする。
+async def _units_power_all(action: str) -> Any:
+    """全号機（state.unit_ips の 1..5）を master-control API 経由で一斉に reboot/shutdown する。
 
-    各号機へ _master_control_power(ip, "shutdown") を asyncio.gather で並行に呼び出し、
+    各号機へ _master_control_power(ip, action) を asyncio.gather で並行に呼び出し、
     オフライン等で失敗した号機は個別にグレースフルへ倒して他号機の処理をブロックしない。
     号機ごとの結果を {"results": {"1": {"ok": true, "message": ...}, ...}} 形式で返す。
     """
@@ -763,7 +762,7 @@ async def post_units_shutdown_all() -> Any:
         targets = {unit: state.unit_ips.get(unit, "") for unit in sorted(state.unit_ips)}
 
     async def _one(unit: int, ip: str) -> tuple[int, bool, str]:
-        ok, msg = await _master_control_power(ip, "shutdown")
+        ok, msg = await _master_control_power(ip, action)
         return unit, ok, msg
 
     outcomes = await asyncio.gather(*[_one(u, ip) for u, ip in targets.items()])
@@ -774,10 +773,23 @@ async def post_units_shutdown_all() -> Any:
         if ok:
             success += 1
     total = len(outcomes)
-    await state.push_notification(f"全機シャットダウン: {success}/{total} 実行")
+    label = "全機シャットダウン" if action == "shutdown" else "全機再起動"
+    await state.push_notification(f"{label}: {success}/{total} 実行")
     snap = state.snapshot()
     await broadcast({"type": "state", "payload": snap})
-    return {"status": "ok", "results": results, "success": success, "total": total}
+    return {"status": "ok", "action": action, "results": results, "success": success, "total": total}
+
+
+@app.post("/api/units/shutdown_all")
+async def post_units_shutdown_all() -> Any:
+    """全号機を master-control API 経由で一斉シャットダウンする。"""
+    return await _units_power_all("shutdown")
+
+
+@app.post("/api/units/reboot_all")
+async def post_units_reboot_all() -> Any:
+    """全号機を master-control API 経由で一斉再起動する。"""
+    return await _units_power_all("reboot")
 
 
 @app.post("/api/notify")
@@ -1175,4 +1187,4 @@ def _ssl_args() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8765, reload=True, **_ssl_args())
+    uvicorn.run("main:app", host="0.0.0.0", port=80, reload=True, **_ssl_args())
