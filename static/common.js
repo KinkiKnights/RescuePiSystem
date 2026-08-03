@@ -164,7 +164,7 @@
         canvas = document.createElement("canvas");
         ctx = canvas.getContext("2d", { willReadFrequently: true });
       }
-      const scale = Math.min(1, 640 / w); // 処理軽量化のため縮小
+      const scale = Math.min(1, 960 / w); // 縮小しすぎると小さいQRを検出できないため 960px 上限
       canvas.width = Math.round(w * scale);
       canvas.height = Math.round(h * scale);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -175,7 +175,13 @@
         return; // クロスオリジンで汚染されている等
       }
       const code = global.jsQR(img.data, img.width, img.height);
-      if (code && code.data) onDetect(decodeQrText(code));
+      // Shift-JIS 等の非 UTF-8 QR では jsQR の code.data が空文字になるため、
+      // 検出判定は binaryData で行う（code.data をゲートにすると読めない）。
+      if (!code) return;
+      const hasBytes = code.binaryData && code.binaryData.length;
+      if (!hasBytes && !code.data) return;
+      const text = decodeQrText(code);
+      if (text) onDetect(text);
     }
 
     const timer = setInterval(function () {
@@ -190,6 +196,16 @@
       method: useJsqr ? "jsQR" : "none",
       stop: function () { clearInterval(timer); },
     };
+  }
+
+  // 読み取り時刻を「分:秒」(mm:ss・ゼロ埋め) で返す。QR を読み取った瞬間の
+  // 時刻を示すためのもの（経過時間ではない）。
+  function formatClockMMSS(ts) {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return mm + ":" + ss;
   }
 
   // 経過時間を「たった今 / N秒前 / N分M秒前」表記にする。
@@ -499,6 +515,7 @@
     createFieldMap: createFieldMap,
     formatCoord: formatCoord,
     formatAgo: formatAgo,
+    formatClockMMSS: formatClockMMSS,
     ROOM_NAMES: ROOM_NAMES,
     COLOR_OPTIONS: COLOR_OPTIONS,
     COLORS: COLORS,

@@ -436,7 +436,7 @@
                 <span class="ana-row__value" id="qrValue">読み取り中</span>
               </div>
               <div class="ana-row">
-                <span class="ana-row__label">最終検出：</span>
+                <span class="ana-row__label">読取(分:秒)：</span>
                 <span class="ana-row__value" id="qrAgo">—</span>
               </div>
               <button type="button" class="confirm2 confirm2--wide" data-confirm="injury">結果確定</button>
@@ -466,7 +466,7 @@
   </div>
   <script src="/static/jsqr.js"></script>
   <script src="/static/webrtc-camera.js"></script>
-  <script src="/static/common.js"></script>
+  <script src="/static/common.js?v=sjis2"></script>
   <script>
     (function () {
       const RC = window.RescueCommon;
@@ -664,9 +664,9 @@
         renderQrAgo();
       }
       function renderQrAgo() {
-        qrAgo.textContent = qrDetectedAt[activeRoom] ? RC.formatAgo(qrDetectedAt[activeRoom]) : "—";
+        // 「読み取った分：秒」を表示（読取時刻を固定表示。次に読み取るまで保持される）。
+        qrAgo.textContent = qrDetectedAt[activeRoom] ? RC.formatClockMMSS(qrDetectedAt[activeRoom]) : "—";
       }
-      setInterval(renderQrAgo, 1000);
       function renderNotes() {
         if (document.activeElement !== notesArea) notesArea.value = cur().notes;
       }
