@@ -838,7 +838,15 @@
         }
 
         if (st.room_analysis) {
+          // サーバー状態で丸ごと置換すると、ローカルでスキャン済み（未確定）の QR が
+          // 配信のたびに消えて「読み取り中」へ戻ってしまう。ローカルに検出値があり
+          // サーバー側が空の部屋は、最後に読み取った値を保持する（次の検出まで表示継続）。
+          const localQr = {};
+          Object.keys(roomAnalysis).forEach(function (r) { localQr[r] = roomAnalysis[r] && roomAnalysis[r].qr; });
           roomAnalysis = st.room_analysis;
+          Object.keys(localQr).forEach(function (r) {
+            if (localQr[r] && roomAnalysis[r] && !roomAnalysis[r].qr) roomAnalysis[r].qr = localQr[r];
+          });
           if (document.activeElement === notesArea) {
             roomAnalysis[activeRoom].notes = notesArea.value;
           }
