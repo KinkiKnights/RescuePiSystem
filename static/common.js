@@ -131,6 +131,27 @@
 
   // getVideo() で対象 <video> を返すと、一定間隔で QR を読取り onDetect(text) を呼ぶ。
   // BarcodeDetector 非対応ブラウザでは何もしない（supported:false）。
+  // jsQR の生バイト（code.binaryData）から文字列を復元する。
+  // バイトモード QR は Shift-JIS/CP932 のこともあるため、まず厳格 UTF-8 で試し、
+  // 失敗（＝非 UTF-8）なら Shift-JIS で解釈する。どちらも不可なら code.data を使う。
+  function decodeQrText(code) {
+    if (!code) return "";
+    const bin = code.binaryData;
+    if (bin && bin.length) {
+      const bytes = Uint8Array.from(bin);
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch (e) {
+        try {
+          return new TextDecoder("shift-jis", { fatal: false }).decode(bytes);
+        } catch (e2) {
+          /* 両デコーダ失敗 → code.data へフォールバック */
+        }
+      }
+    }
+    return code.data || "";
+  }
+
   function createQrScanner(getVideo, onDetect, intervalMs) {
     // QR デコードは jsQR（static/jsqr.js）で行う。
     const useJsqr = typeof global.jsQR === "function";
@@ -154,7 +175,7 @@
         return; // クロスオリジンで汚染されている等
       }
       const code = global.jsQR(img.data, img.width, img.height);
-      if (code && code.data) onDetect(code.data);
+      if (code && code.data) onDetect(decodeQrText(code));
     }
 
     const timer = setInterval(function () {
