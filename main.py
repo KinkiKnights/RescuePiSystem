@@ -158,6 +158,182 @@ def load_unit_ips() -> dict[int, str]:
 UNIT_IPS = load_unit_ips()
 
 
+# ===== 号機 宛先マルチパス化（候補アドレス多重化＋live経路の自動選択） =====
+# unit_addrs: 号機ごとの「優先順の候補アドレス配列」。優先順は
+#   192.168.10.11N(無線/最優先) > 192.168.10.13N(調整用WiFi) >
+#   192.168.10.12N(有線) > kk0N.local(mDNSフォールバック)。
+# 号機側は全経路 0.0.0.0 で待受＝どの候補でも応答する前提。unit_addrs 未定義の
+# 号機は後方互換で unit_ips の単一値を 1 要素配列として扱う。
+RESOLVE_DEFAULTS: dict[str, Any] = {
+    "probe_interval_sec": 3.0,
+    "probe_timeout_sec": 1.0,
+    "sticky": True,
+}
+
+
+def load_unit_addrs() -> dict[int, list[str]]:
+    """config.json の unit_addrs を号機→優先順候補配列で読み込む。
+
+    unit_addrs が無い/空の号機は unit_ips の単一値を 1 要素配列に落として後方互換。
+    config.json が無い/壊れている場合は unit_ips 由来（＝UNIT_IPS）のみで構成する。
+    """
+    addrs: dict[int, list[str]] = {i: [] for i in range(1, 6)}
+    data: Any = {}
+    try:
+        with CONFIG_PATH.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"[WARN] {CONFIG_PATH} が見つかりません。号機候補アドレスは unit_ips のみで構成します。")
+        data = {}
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[WARN] {CONFIG_PATH} を読み込めませんでした（{exc}）。号機候補アドレスは unit_ips のみで構成します。")
+        data = {}
+
+    raw = data.get("unit_addrs", {}) if isinstance(data, dict) else {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                n = int(k)
+            except (ValueError, TypeError):
+                continue
+            if not (1 <= n <= 5) or not isinstance(v, list):
+                continue
+            cands: list[str] = []
+            for a in v:
+                s = str(a).strip()
+                if s and s not in cands:
+                    cands.append(s)
+            addrs[n] = cands
+    else:
+        print(f"[WARN] {CONFIG_PATH} の unit_addrs が不正な形式です。unit_ips のみで構成します。")
+
+    # 後方互換: 候補が空の号機は unit_ips の単一値を 1 要素配列にする。
+    for n in range(1, 6):
+        if not addrs[n]:
+            single = UNIT_IPS.get(n, "")
+            addrs[n] = [single] if single else []
+    return addrs
+
+
+def load_resolve_config() -> dict[str, Any]:
+    """config.json の resolve 設定（probe 間隔・タイムアウト・sticky）を読み込む。"""
+    cfg = dict(RESOLVE_DEFAULTS)
+    data: Any = {}
+    try:
+        with CONFIG_PATH.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return cfg
+    raw = data.get("resolve", {}) if isinstance(data, dict) else {}
+    if isinstance(raw, dict):
+        try:
+            cfg["probe_interval_sec"] = (
+                float(raw.get("probe_interval_sec", cfg["probe_interval_sec"]))
+                or cfg["probe_interval_sec"]
+            )
+        except (TypeError, ValueError):
+            pass
+        try:
+            cfg["probe_timeout_sec"] = (
+                float(raw.get("probe_timeout_sec", cfg["probe_timeout_sec"]))
+                or cfg["probe_timeout_sec"]
+            )
+        except (TypeError, ValueError):
+            pass
+        cfg["sticky"] = bool(raw.get("sticky", cfg["sticky"]))
+    return cfg
+
+
+def _route_type(addr: str | None) -> str | None:
+    """採用アドレスから経路種別ラベルを判定する（API 表示用）。"""
+    if not addr:
+        return None
+    if addr.endswith(".local"):
+        return "mdns"
+    if addr.startswith("192.168.10.11"):
+        return "11x"
+    if addr.startswith("192.168.10.13"):
+        return "13x"
+    if addr.startswith("192.168.10.12"):
+        return "wired"
+    return "other"
+
+
+class UnitRouteResolver:
+    """号機ごとの候補アドレスから live 経路を選び、現用アドレスを保持する経路選択器。
+
+    - _units_ping_loop が候補を優先順に probe し、その結果で状態を更新する。
+    - sticky=True の間は現用アドレスが live な限り切替えない（無駄な再接続を避ける）。
+    - resolve(n) は現在採用中の live アドレス（無ければ None）を返す単一解決関数。
+    """
+
+    def __init__(self, unit_addrs: dict[int, list[str]], sticky: bool) -> None:
+        self.unit_addrs = unit_addrs
+        self.sticky = sticky
+        # 現用アドレス（live 経路が無い号機は None）
+        self.current: dict[int, str | None] = {n: None for n in unit_addrs}
+        # 候補ごとの生死（True/False/None=未確認）
+        self.liveness: dict[int, dict[str, bool | None]] = {
+            n: {a: None for a in cands} for n, cands in unit_addrs.items()
+        }
+        # 号機×候補ごとの連続 live 回数（上位への昇格ヒステリシス用）
+        self._live_streak: dict[int, dict[str, int]] = {n: {} for n in unit_addrs}
+        self.updated: float = 0.0
+
+    def choose(self, n: int, live: dict[str, bool]) -> str | None:
+        """probe 結果(live: 候補→bool)から現用アドレスを決める。
+
+        候補は優先順(先頭=最優先)。sticky=True でも上位候補が復活したら昇格する。
+        - 現用が dead（未設定含む）→ 優先順で最上位 live を即採用（従来どおり・即時）。
+        - 現用が live → より上位に「2連続 probe で live」な候補があればその最上位へ昇格。
+          spurious な 1 回の live で飛びつかないためのヒステリシス（ダウン方向は即時）。
+        - 現用が既に最優先 live／上位に昇格対象が無ければ維持。全 dead なら None。
+        """
+        cands = self.unit_addrs.get(n, [])
+        cur = self.current.get(n)
+
+        # 連続 live 回数を更新（live で +1、dead で 0）。上位昇格の条件に使う。
+        streak = self._live_streak.setdefault(n, {})
+        for a in cands:
+            streak[a] = streak.get(a, 0) + 1 if live.get(a) else 0
+
+        # sticky 無効時は従来どおり優先順で最上位 live を即採用（張り付き無し）。
+        if not self.sticky:
+            for a in cands:
+                if live.get(a):
+                    return a
+            return None
+
+        # 現用が live でない（未設定/dead）→ 優先順で最上位 live へ即フェイルオーバー。
+        if not (cur and live.get(cur)):
+            for a in cands:
+                if live.get(a):
+                    return a
+            return None
+
+        # 現用は live。より上位に「2連続 live」候補があれば最上位へ昇格する。
+        cur_idx = cands.index(cur) if cur in cands else len(cands)
+        for a in cands[:cur_idx]:
+            if live.get(a) and streak.get(a, 0) >= 2:
+                return a
+        return cur  # 昇格対象なし → 現用維持
+
+    def resolve(self, n: int) -> str | None:
+        """号機 n の現在採用中の live アドレスを返す（無ければ None）。"""
+        return self.current.get(n)
+
+
+# 号機→優先順候補配列（config.json 由来・固定設定）と経路選択器の実体
+UNIT_ADDRS = load_unit_addrs()
+RESOLVE_CONFIG = load_resolve_config()
+resolver = UnitRouteResolver(UNIT_ADDRS, bool(RESOLVE_CONFIG["sticky"]))
+
+
+def resolve_unit_addr(n: int) -> str | None:
+    """号機 n の現用 live アドレスを返す単一解決関数（全宛先参照はこれを経由）。"""
+    return resolver.resolve(n)
+
+
 # ===== Ping 監視（ネットワーク機器の死活監視。旧 ping-monitor から統合） =====
 PING_DEFAULTS: dict[str, Any] = {"interval_sec": 5, "ping_timeout_sec": 1, "devices": []}
 
@@ -344,31 +520,55 @@ async def _ping_or_false(ip: str, timeout_sec: float) -> bool:
 
 
 async def _units_ping_loop() -> None:
-    """各号機IP(config.json 由来)を定期 ping し、units[n].connected を実測で更新・配信する。
+    """各号機の候補アドレスを優先順に probe し、live 経路を自動選択して配信する経路選択器。
 
-    - 手動 disabled 中の号機は ping で上書きしない（disabled と connected の意味を保つ）。
-    - connected に変化があったときのみ全クライアントへ state を配信する（無駄な再送を避ける）。
-    - _default_units の connected(i!=2) は初期値のみで、起動後は実 ping が権威となる。
+    - 各号機の候補配列を並行 probe(probe_timeout_sec)して生死表を作り、resolver で現用
+      アドレスを決める（sticky=true の間は現用が live な限り切替えない＝再接続を避ける）。
+    - 選択結果を state.units[n].connected（手動 disabled 中は上書きしない）と、状態配信用
+      の state.unit_ips[n]（採用済み単一アドレス。フロントは既存の IP 変化検知で追随）へ
+      反映する。live 経路が無い号機は connected=false・採用アドレスは直近値を維持する。
+    - connected もしくは採用アドレスに変化があったときのみ全クライアントへ配信する。
+    - ループ間隔は resolve.probe_interval_sec、probe タイムアウトは probe_timeout_sec。
+    - _default_units の connected(i!=2) は初期値のみで、起動後は実 probe が権威となる。
     """
+    interval = float(RESOLVE_CONFIG["probe_interval_sec"])
+    timeout = float(RESOLVE_CONFIG["probe_timeout_sec"])
     while True:
-        targets = [(n, UNIT_IPS.get(n, "")) for n in range(1, 6)]
-        results = await asyncio.gather(
-            *[_ping_or_false(ip, UNITS_PING_TIMEOUT_SEC) for _, ip in targets]
+        # 号機ごとに全候補を並行 probe して生死表を作る（現用選択にも API 表示にも使う）。
+        units = sorted(UNIT_ADDRS)
+        probe_jobs: list[tuple[int, str]] = [
+            (n, a) for n in units for a in UNIT_ADDRS[n]
+        ]
+        probe_results = await asyncio.gather(
+            *[_ping_or_false(a, timeout) for _, a in probe_jobs]
         )
+        live_by_unit: dict[int, dict[str, bool]] = {n: {} for n in units}
+        for (n, a), ok in zip(probe_jobs, probe_results):
+            live_by_unit[n][a] = bool(ok)
+
         changed = False
         async with state.lock:
-            for (n, _ip), ok in zip(targets, results):
+            for n in units:
+                live = live_by_unit[n]
+                chosen = resolver.choose(n, live)
+                resolver.liveness[n] = {a: live.get(a) for a in UNIT_ADDRS[n]}
+                resolver.current[n] = chosen
                 u = state.units.get(n)
                 if u is None or u.get("disabled"):
                     continue
-                online = bool(ok)
+                online = chosen is not None
                 if u.get("connected") != online:
                     u["connected"] = online
                     changed = True
+                # 採用済み単一アドレスを配信用に反映（live 経路が無ければ直近値を維持）。
+                if chosen and state.unit_ips.get(n) != chosen:
+                    state.unit_ips[n] = chosen
+                    changed = True
+            resolver.updated = time.time()
         if changed:
             snap = state.snapshot()
             await broadcast({"type": "state", "payload": snap})
-        await asyncio.sleep(UNITS_PING_INTERVAL_SEC)
+        await asyncio.sleep(max(1.0, interval))
 
 
 def _default_tasks() -> list[dict[str, Any]]:
@@ -653,6 +853,38 @@ async def get_state() -> dict[str, Any]:
         return state.snapshot()
 
 
+@app.get("/api/units")
+async def get_units() -> dict[str, Any]:
+    """各号機の採用アドレス・接続状態・候補生死・経路種別を返す（マルチパス経路の可視化）。
+
+    - addr: 現在採用中の live アドレス（live 経路が無ければ null）。
+    - connected: 採用アドレスの有無（＝いずれかの経路が live か）。
+    - route_type: 採用経路の種別（11x=無線 / 13x=調整用WiFi / wired=有線 / mdns）。
+    - candidates: 優先順の候補ごとに {addr, up(true/false/null=未確認), route_type}。
+    """
+    units: dict[str, Any] = {}
+    for n in sorted(UNIT_ADDRS):
+        chosen = resolver.current.get(n)
+        live = resolver.liveness.get(n, {})
+        units[str(n)] = {
+            "unit": n,
+            "addr": chosen,
+            "connected": chosen is not None,
+            "route_type": _route_type(chosen),
+            "candidates": [
+                {"addr": a, "up": live.get(a), "route_type": _route_type(a)}
+                for a in UNIT_ADDRS[n]
+            ],
+        }
+    return {
+        "units": units,
+        "updated": resolver.updated,
+        "sticky": resolver.sticky,
+        "probe_interval_sec": RESOLVE_CONFIG["probe_interval_sec"],
+        "probe_timeout_sec": RESOLVE_CONFIG["probe_timeout_sec"],
+    }
+
+
 @app.get("/api/ping/status")
 async def get_ping_status() -> dict[str, Any]:
     """各機器の最新 ping 結果（online: true/false/null）をまとめて返す。"""
@@ -725,7 +957,8 @@ async def _unit_power_action(action: str) -> Any:
     """control_operating_unit の号機へ reboot/shutdown を試み、結果を JSON で返す。"""
     async with state.lock:
         unit = state.control_operating_unit
-        ip = state.unit_ips.get(unit, "")
+    # 宛先はマルチパス経路選択器が採用中の live アドレス（無ければ空＝グレースフル失敗）。
+    ip = resolve_unit_addr(unit) or ""
     ok, msg = await _master_control_power(ip, action)
     label = "シャットダウン" if action == "shutdown" else "再起動"
     if ok:
@@ -758,8 +991,8 @@ async def _units_power_all(action: str) -> Any:
     オフライン等で失敗した号機は個別にグレースフルへ倒して他号機の処理をブロックしない。
     号機ごとの結果を {"results": {"1": {"ok": true, "message": ...}, ...}} 形式で返す。
     """
-    async with state.lock:
-        targets = {unit: state.unit_ips.get(unit, "") for unit in sorted(state.unit_ips)}
+    # 各号機の宛先はマルチパス経路選択器の採用アドレス（未 live は空＝個別にグレースフル）。
+    targets = {unit: (resolve_unit_addr(unit) or "") for unit in sorted(UNIT_ADDRS)}
 
     async def _one(unit: int, ip: str) -> tuple[int, bool, str]:
         ok, msg = await _master_control_power(ip, action)
@@ -1054,7 +1287,7 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
         if auto_cancel:
             # 送信はエッジトリガの副作用。UI 反映(broadcast)を待たせないよう非同期発火。
             asyncio.create_task(
-                _send_robot_command(state.unit_ips.get(5, ""), {"command": "cancel_goal"})
+                _send_robot_command(resolve_unit_addr(5) or "", {"command": "cancel_goal"})
             )
 
     elif msg_type == "set_field_side":
@@ -1117,7 +1350,7 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
                 state.unit5_auto_run = "off"
                 do_cancel = True
                 changed = True
-        ip = state.unit_ips.get(5, "")
+        ip = resolve_unit_addr(5) or ""
         # 送信はエッジトリガの副作用。UI 反映(broadcast)を待たせないよう非同期発火。
         if goal_payload is not None:
             asyncio.create_task(
