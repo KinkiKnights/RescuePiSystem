@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -17,14 +18,23 @@ INDEX_FILE    = os.path.join(BASE_DIR, 'index.html')
 PORT = 80
 
 
-def _terminate_tree(proc):
-    """Terminate a program and ALL its descendants.
+def _terminate_tree(proc, grace=5.0):
+    """Terminate a program and ALL its descendants, robustly.
 
-    Programs are launched with start_new_session=True, so the child becomes the
-    leader of a new process group. Signalling that whole group (killpg) ensures
-    grandchildren such as `ros2 run`'s node or the camera publisher are killed
-    too — a plain proc.terminate() would only kill the immediate shell and leave
-    the real worker orphaned (camera/port stays busy and restart fails).
+    Programs are launched with start_new_session=True, so the child leads a new
+    process group; signalling that whole group (killpg) reaches grandchildren
+    such as `ros2 run`'s node or the camera publisher too.
+
+    We must wait for the ENTIRE group to exit, not merely the tracked leader.
+    The previous version did `killpg(SIGTERM)` then `proc.wait(timeout=5)` and
+    escalated to SIGKILL only if that wait timed out. But `proc.wait()` returns
+    as soon as the tracked *leader* (e.g. the `ros2 run` wrapper) exits — when a
+    slower grandchild node had not yet honoured SIGTERM, the wait returned early,
+    the SIGKILL escalation was skipped, and the node was reparented to init
+    (ppid=1) as an orphan: a duplicate DDS publisher that corrupts discovery.
+
+    Here we poll the whole process group for liveness and, if anything survives
+    the grace period, SIGKILL the group (plus any escapee descendant by PID).
     """
     if proc is None or proc.poll() is not None:
         return
@@ -32,13 +42,56 @@ def _terminate_tree(proc):
         pgid = os.getpgid(proc.pid)
     except ProcessLookupError:
         return
+
+    def _group_alive():
+        # signal 0 probes the whole process group; ESRCH -> nobody left.
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    # 1. Polite shutdown of the whole group.
     try:
         os.killpg(pgid, signal.SIGTERM)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
+        pass
+
+    # 2. Wait for EVERY group member to exit (reaping the leader as it goes).
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline and _group_alive():
+        try:
+            proc.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            time.sleep(0.1)  # leader reaped; keep polling for stragglers
+
+    # 3. Escalate: SIGKILL the whole group, then chase any escapee descendants.
+    if _group_alive():
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            me = psutil.Process(proc.pid)
+            for child in me.children(recursive=True):
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        except psutil.NoSuchProcess:
+            pass
+        kdeadline = time.monotonic() + 3.0
+        while time.monotonic() < kdeadline and _group_alive():
+            time.sleep(0.1)
+
+    # 4. Reap the tracked leader so it never lingers as a zombie.
+    try:
+        proc.wait(timeout=1)
+    except Exception:
         pass
 
 
