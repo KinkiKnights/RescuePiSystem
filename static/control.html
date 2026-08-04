@@ -434,6 +434,22 @@
       background: #35a052;
       border-color: #37b357;
     }
+    /* 自動探索実行ボタン: idle=通常/無効 / requested=赤青点滅 / running=緑 */
+    .auto-search-btn { position: relative; }
+    .auto-search-btn[data-state="idle"] { color: var(--muted); }
+    .auto-search-btn[data-state="idle"]:disabled { opacity: 0.6; cursor: default; }
+    .auto-search-btn[data-state="requested"] {
+      color: #ffffff; border-color: #e8943a;
+      animation: autoSearchBlink 0.7s steps(1) infinite;
+    }
+    .auto-search-btn[data-state="running"] {
+      color: #ffffff; background: #2f8f46; border-color: #37b357;
+      box-shadow: 0 0 10px 2px rgba(47, 143, 70, 0.7);
+    }
+    @keyframes autoSearchBlink {
+      0%, 100% { background: #c0392b; border-color: #ff6a6a; }
+      50% { background: #2f6fd6; border-color: #5c98ea; }
+    }
     @keyframes autoRunBlink {
       0%, 100% { background: #c46a1a; }
       50% { background: #e8943a; }
@@ -501,6 +517,7 @@
           <h2 class="panel-title">操作</h2>
           <div class="btn-row">
             <button type="button" class="btn auto-run-btn" id="unit5AutoRun" data-state="off">5号機自動走行</button>
+            <button type="button" class="btn auto-search-btn" id="autoSearchRun" data-state="idle" disabled>自動探索実行</button>
             <button type="button" class="btn" id="unitReboot">再起動</button>
             <button type="button" class="btn" id="unitShutdown">シャットダウン</button>
           </div>
@@ -564,6 +581,50 @@
         // off の場合はサーバー側で無視される（暗室座標未入力＝走行対象なし）。
         client.send({ type: "unit5_auto_run_toggle" });
       });
+
+      /* 自動探索実行ボタン（AutoControlRes2026 と連携）。
+         AutoControl の GET /status をポーリングし、pilot_requested=true の間は
+         点滅・有効化。押下で POST /act/start（走行開始）。running 中は緑。停止で通常。
+         ベースURLは同一ホスト:8092 を既定とし、必要なら定数で上書きする。 */
+      var AUTOCONTROL_BASE =
+        window.AUTOCONTROL_BASE ||
+        (location.protocol + "//" + location.hostname + ":8092");
+      var autoSearchBtn = document.getElementById("autoSearchRun");
+      function renderAutoSearch(st) {
+        if (!st) { // 到達不可 → 無効・通常
+          autoSearchBtn.dataset.state = "idle";
+          autoSearchBtn.disabled = true;
+          return;
+        }
+        if (st.running) {
+          autoSearchBtn.dataset.state = "running"; // 走行中=緑
+          autoSearchBtn.disabled = false;
+        } else if (st.pilot_requested) {
+          autoSearchBtn.dataset.state = "requested"; // 要求中=赤青点滅・押下可
+          autoSearchBtn.disabled = false;
+        } else {
+          autoSearchBtn.dataset.state = "idle"; // 通常・無効
+          autoSearchBtn.disabled = true;
+        }
+      }
+      function pollAutoSearch() {
+        fetch(AUTOCONTROL_BASE + "/status", { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(renderAutoSearch)
+          .catch(function () { renderAutoSearch(null); });
+      }
+      autoSearchBtn.addEventListener("click", function () {
+        if (autoSearchBtn.disabled) return;
+        fetch(AUTOCONTROL_BASE + "/act/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        }).then(function (r) { return r.json(); })
+          .then(renderAutoSearch)
+          .catch(function () {});
+      });
+      setInterval(pollAutoSearch, 1000);
+      pollAutoSearch();
 
       function renderTasks(tasks) {
         RC.renderTasks(taskList, tasks, roomUnits);
@@ -831,7 +892,7 @@
           axes: Array.from(gp.axes),
           buttons: gp.buttons.map(function (b) { return b.value; }),
         }));
-      }, 50);
+      }, 16);  // ~60Hz heartbeat: send current controller state every cycle (no change-based coalescing) so signal loss is distinguishable from 'no input'
 
       let viewMode = "both"; // "a" = 操作機のみ / "b" = 天カメのみ / "both" = 2画面
       let videoUnitA = 1;
