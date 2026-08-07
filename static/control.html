@@ -640,13 +640,18 @@
 
       const unitSelect = document.getElementById("unitSelect");
 
+      // 機体選択はこの画面（クライアント）ローカル。サーバー共有状態には載せず、
+      // 他のユーザーの画面には影響しない。
+      let selectedUnit = 1;
+      let latestState = {};
+
       function renderUnitSelect(st) {
         const units = st.units || {};
         const req = st.control_request || {};
         unitSelect.innerHTML = [1, 2, 3, 4, 5]
           .map(function (n) {
             const u = units[n] || {};
-            const isSelf = n === st.control_operating_unit;
+            const isSelf = n === selectedUnit;
             const isReq = !!req.pending && req.unit === n;
             let badge = "";
             if (u.disabled) {
@@ -851,13 +856,23 @@
       const joyWsStatus = document.getElementById("joyWsStatus");
 
       let joyWs = null;
+      let joyPendingWs = null; // 接続試行中（CONNECTING）のソケットも追跡して切替時に破棄する
       let joyCurrentIp = "";
+      let joySeq = 0; // 接続世代。古いソケットのイベントが新しい接続先の表示を上書きしないようにする
 
       function setJoyDot(s) {
         joyWsDot.className = "joy-ws__dot" + (s ? " joy-ws__dot--" + s : "");
       }
 
       function connectJoy(ip) {
+        joySeq++;
+        const seq = joySeq;
+        if (joyPendingWs) {
+          joyPendingWs.onopen = null;
+          joyPendingWs.onclose = null;
+          try { joyPendingWs.close(); } catch (e) {}
+          joyPendingWs = null;
+        }
         if (joyWs) { joyWs.onclose = null; joyWs.close(); joyWs = null; }
         if (!ip) {
           setJoyDot("");
@@ -868,17 +883,32 @@
         setJoyDot("connecting");
         joyWsStatus.textContent = "joy: 接続中 (" + ip + ")";
         const ws = new WebSocket(url);
+        joyPendingWs = ws;
         ws.onopen = function () {
+          if (seq !== joySeq) { try { ws.close(); } catch (e) {} return; }
+          joyPendingWs = null;
           joyWs = ws;
           setJoyDot("ok");
           joyWsStatus.textContent = "joy: " + ip;
         };
         ws.onclose = function () {
+          if (seq !== joySeq) return; // 旧世代のクローズは無視（表示を汚さない）
+          joyPendingWs = null;
           joyWs = null;
           setJoyDot("err");
           joyWsStatus.textContent = "joy: 切断 (" + ip + ")";
         };
         ws.onerror = function () {};
+      }
+
+      // 選択中号機の IP へ joy 接続を追従させる（選択変更・unit_ips 更新の両方から呼ぶ）
+      function updateJoyTarget() {
+        const unitIps = latestState.unit_ips || {};
+        const newIp = unitIps[selectedUnit] || "";
+        if (newIp !== joyCurrentIp) {
+          joyCurrentIp = newIp;
+          connectJoy(newIp);
+        }
       }
 
       setInterval(function () {
@@ -896,7 +926,6 @@
 
       let viewMode = "both"; // "a" = 操作機のみ / "b" = 天カメのみ / "both" = 2画面
       let videoUnitA = 1;
-      let currentOperatingUnit = 1; // 操作中の号機（再起動/シャットダウン対象）
       let webrtcServer = "";
 
       const OVERHEAD_UNIT = 1; // 天カメ = 1号機のカメラ
@@ -942,7 +971,7 @@
           RC.setConnBadge(connBadge, s);
         },
         onState: function (st) {
-          currentOperatingUnit = st.control_operating_unit || currentOperatingUnit;
+          latestState = st;
           roomUnits = st.room_units || roomUnits;
           if (st.room_analysis) {
             roomAnalysis = st.room_analysis;
@@ -953,8 +982,8 @@
           renderAutoRun(st.unit5_auto_run);
           renderUnitSelect(st);
           let needVideo = false;
-          if (st.control_operating_unit !== videoUnitA) {
-            videoUnitA = st.control_operating_unit;
+          if (selectedUnit !== videoUnitA) {
+            videoUnitA = selectedUnit;
             needVideo = true;
           }
           const nextServer = st.webrtc_server || "";
@@ -965,12 +994,7 @@
           if (needVideo) renderVideo();
           showNotification(st.notification);
 
-          const unitIps = st.unit_ips || {};
-          const newIp = unitIps[st.control_operating_unit] || "";
-          if (newIp !== joyCurrentIp) {
-            joyCurrentIp = newIp;
-            connectJoy(newIp);
-          }
+          updateJoyTarget();
 
           const req = st.control_request || {};
           if (req.pending && req.unit >= 1 && req.unit <= 5) {
@@ -984,13 +1008,31 @@
         },
       });
 
+      // 機体選択をこのクライアント内だけで反映する（サーバーへは送らない）
+      function applyLocalSelection(unit) {
+        if (unit < 1 || unit > 5) return;
+        selectedUnit = unit;
+        renderUnitSelect(latestState);
+        if (selectedUnit !== videoUnitA) {
+          videoUnitA = selectedUnit;
+          renderVideo();
+        }
+        updateJoyTarget();
+      }
+
+      // 操縦要請の受諾：サーバーの pending をクリアしつつ、自画面の選択を要請号機へ
+      function acceptControlRequest() {
+        const unit = pendingRequestUnit;
+        client.send({ type: "accept_control_request" });
+        if (unit) applyLocalSelection(unit);
+      }
+
       function selectOperatingUnit(unit) {
         if (pendingRequestUnit === unit) {
-          client.send({ type: "accept_control_request" });
+          acceptControlRequest();
           return;
         }
-        client.send({ type: "set_control_operating", unit: unit });
-        client.send({ type: "set_control_video", unit: unit });
+        applyLocalSelection(unit);
       }
 
       document.addEventListener("keydown", function (e) {
@@ -1021,7 +1063,7 @@
         if (e.target.matches("button")) return;
         if (!pendingRequestUnit) return;
         e.preventDefault();
-        client.send({ type: "accept_control_request" });
+        acceptControlRequest();
       });
 
       // ---- 再起動 / シャットダウン（操作中の号機へ POST・確認ダイアログ付き）----
@@ -1029,11 +1071,15 @@
       const unitShutdownBtn = document.getElementById("unitShutdown");
 
       function powerAction(kind) {
-        const unit = currentOperatingUnit;
+        const unit = selectedUnit; // この画面で選択中の号機（クライアントローカル）を明示指定
         const label = kind === "shutdown" ? "シャットダウン" : "再起動";
         if (!window.confirm(unit + "号機を" + label + "します。よろしいですか？")) return;
         const path = kind === "shutdown" ? "/api/unit/shutdown" : "/api/unit/reboot";
-        fetch(path, { method: "POST" })
+        fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ unit: unit }),
+        })
           .then(function (res) {
             return res.json().then(function (body) { return { ok: res.ok, body: body }; });
           })

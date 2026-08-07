@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -640,8 +640,8 @@ def _default_units() -> dict[int, dict[str, Any]]:
 
 class AppState:
     def __init__(self) -> None:
-        self.control_video_unit: int = 1
-        self.control_operating_unit: int = 1
+        # 操縦画面の機体選択（旧 control_video_unit / control_operating_unit）は
+        # クライアントローカルへ移行済み。サーバー共有状態には持たない。
         self.analytics_target_unit: int = 1
         self.notification: dict[str, Any] = {
             "text": "",
@@ -693,8 +693,6 @@ class AppState:
 
     def snapshot(self) -> dict[str, Any]:
         return {
-            "control_video_unit": self.control_video_unit,
-            "control_operating_unit": self.control_operating_unit,
             "analytics_target_unit": self.analytics_target_unit,
             "notification": dict(self.notification),
             "tasks": deepcopy(self.tasks),
@@ -734,8 +732,6 @@ class AppState:
                 }
 
     def reset(self) -> None:
-        self.control_video_unit = 1
-        self.control_operating_unit = 1
         self.analytics_target_unit = 1
         self.notification = {"text": "", "active": False, "timestamp": 0}
         self.tasks = deepcopy(DEFAULT_TASKS)
@@ -953,10 +949,32 @@ async def _master_control_power(ip: str, action: str) -> tuple[bool, str]:
     return await asyncio.to_thread(_master_control_power_sync, ip, action)
 
 
-async def _unit_power_action(action: str) -> Any:
-    """control_operating_unit の号機へ reboot/shutdown を試み、結果を JSON で返す。"""
-    async with state.lock:
-        unit = state.control_operating_unit
+async def _parse_unit_from_request(request: Request) -> int:
+    """リクエスト JSON ボディから対象号機を取り出す（無効・欠落時は 0）。
+
+    機体選択はクライアントローカルのため、対象号機はクライアントが
+    {"unit": n} で明示指定する。
+    """
+    try:
+        body = await request.json()
+        unit = int(body.get("unit", 0))
+    except Exception:
+        unit = 0
+    return unit if 1 <= unit <= 5 else 0
+
+
+async def _unit_power_action(action: str, unit: int) -> Any:
+    """指定号機へ reboot/shutdown を試み、結果を JSON で返す。"""
+    label0 = "シャットダウン" if action == "shutdown" else "再起動"
+    if not (1 <= unit <= 5):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "unit": unit,
+                "message": f"{label0}に失敗: 対象号機が指定されていません（unit=1..5 を送信してください）",
+            },
+        )
     # 宛先はマルチパス経路選択器が採用中の live アドレス（無ければ空＝グレースフル失敗）。
     ip = resolve_unit_addr(unit) or ""
     ok, msg = await _master_control_power(ip, action)
@@ -973,15 +991,17 @@ async def _unit_power_action(action: str) -> Any:
 
 
 @app.post("/api/unit/reboot")
-async def post_unit_reboot() -> Any:
-    """操作中の号機（control_operating_unit）を master-control API 経由で再起動する。"""
-    return await _unit_power_action("reboot")
+async def post_unit_reboot(request: Request) -> Any:
+    """クライアントが指定した号機（body: {"unit": n}）を master-control API 経由で再起動する。"""
+    unit = await _parse_unit_from_request(request)
+    return await _unit_power_action("reboot", unit)
 
 
 @app.post("/api/unit/shutdown")
-async def post_unit_shutdown() -> Any:
-    """操作中の号機（control_operating_unit）を master-control API 経由でシャットダウンする。"""
-    return await _unit_power_action("shutdown")
+async def post_unit_shutdown(request: Request) -> Any:
+    """クライアントが指定した号機（body: {"unit": n}）を master-control API 経由でシャットダウンする。"""
+    unit = await _parse_unit_from_request(request)
+    return await _unit_power_action("shutdown", unit)
 
 
 async def _units_power_all(action: str) -> Any:
@@ -1109,19 +1129,8 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
                 state.analytics_target_unit = unit
                 changed = True
 
-    elif msg_type == "set_control_video":
-        unit = int(msg.get("unit", 1))
-        async with state.lock:
-            if 1 <= unit <= 5:
-                state.control_video_unit = unit
-                changed = True
-
-    elif msg_type == "set_control_operating":
-        unit = int(msg.get("unit", 1))
-        async with state.lock:
-            if 1 <= unit <= 5:
-                state.control_operating_unit = unit
-                changed = True
+    # set_control_video / set_control_operating は廃止：操縦画面の機体選択は
+    # クライアントローカルになり、サーバー共有状態を経由しない。
 
     elif msg_type == "engineer_action":
         action = msg.get("action")
@@ -1180,11 +1189,11 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
             await state.push_notification(notify_text)
 
     elif msg_type == "accept_control_request":
+        # pending をクリアするのみ。機体選択はクライアントローカルのため、
+        # 受諾したクライアントが自画面の選択を要請号機へ切り替える。
         async with state.lock:
             req = state.control_request
             if req.get("pending") and 1 <= req.get("unit", 0) <= 5:
-                state.control_video_unit = req["unit"]
-                state.control_operating_unit = req["unit"]
                 state.control_request = {
                     "pending": False,
                     "unit": 0,

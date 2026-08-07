@@ -206,7 +206,8 @@
       </section>
 
       <aside class="col col--right panel">
-        <p class="operating-banner">操縦中：<span id="operatingUnit">1</span>号機</p>
+        <!-- 「操縦中」バナーは廃止：機体選択は各操縦クライアントのローカル状態になり、
+             サーバー共有の単一の操縦中号機は存在しない。 -->
         <p class="target-banner">対象：<span id="targetUnitLabel">1</span>号機</p>
         <h2 class="panel-title">操作</h2>
         <div class="btn-row action-list" id="actionList"></div>
@@ -246,7 +247,6 @@
       const showNotification = RC.createNotifier(notifyBar, notifyText);
       const taskList = document.getElementById("taskList");
       const videoGrid = document.getElementById("videoGrid");
-      const operatingUnit = document.getElementById("operatingUnit");
       const targetUnitLabel = document.getElementById("targetUnitLabel");
       const actionList = document.getElementById("actionList");
 
@@ -398,7 +398,6 @@
             }
             return connTile(n + "号機", u.connected, status, {
               unit: n,
-              operating: n === st.control_operating_unit,
             });
           })
           .join("");
@@ -459,7 +458,6 @@
           RC.setConnBadge(connBadge, s);
         },
         onState: function (st) {
-          operatingUnit.textContent = st.control_operating_unit || 1;
           latestUnits = st.units || {};
           roomUnits = st.room_units || roomUnits;
           showNotification(st.notification);
