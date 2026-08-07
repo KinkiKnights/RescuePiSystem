@@ -318,7 +318,12 @@
       function itemValueHtml(a, key) {
         if (key === "qrstove") {
           const qr = a.qr ? esc(a.qr) : '<span class="muted">読み取り中</span>';
-          const stove = a.stove ? esc(a.stove) : '<span class="muted">—</span>';
+          // ストーブ有無は解析側の「結果確定」（stoveDone）後の値のみ表示する。
+          // 未確定の選択途中の値は報告対象にしない（確定されると WS 配信で反映され、
+          // 報告済みの行は sigOf の変化検知により「更新」バッジ＋未報告へ戻る）。
+          const stove = a.stoveDone
+            ? (a.stove ? esc(a.stove) : '<span class="muted">—</span>')
+            : '<span class="muted">未確定</span>';
           return pairHtml("QR", qr) + pairHtml("ストーブ", stove);
         }
         if (key === "color") {
