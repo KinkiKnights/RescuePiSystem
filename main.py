@@ -612,6 +612,13 @@ def _default_room_analysis() -> dict[str, dict[str, Any]]:
             "color": "",
             "colorDone": False,
             "notes": "",
+            # 鳴動パターン：12 マスの ON/OFF を "0"/"1" の 12 文字で保持
+            # （左 3 マスは UI 上選択不可で常に "0"）。
+            "pattern": "",
+            # 周波数：damiyan の監視 12 周波数（frequencies.json）から選択した値（Hz、文字列）
+            "freq": "",
+            # 鳴動パターン・周波数の結果確定フラグ（stoveDone 等と同じ確定ゲート）
+            "patternDone": False,
         }
         for r in ("A", "B", "C")
     }
@@ -1225,10 +1232,10 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
         async with state.lock:
             ra = state.room_analysis.get(room)
             if ra is not None:
-                for key in ("stove", "color", "notes", "qr"):
+                for key in ("stove", "color", "notes", "qr", "pattern", "freq"):
                     if key in msg:
                         ra[key] = str(msg[key])
-                for key in ("stoveDone", "injuryDone", "colorDone"):
+                for key in ("stoveDone", "injuryDone", "colorDone", "patternDone"):
                     if key in msg:
                         ra[key] = bool(msg[key])
                 changed = True

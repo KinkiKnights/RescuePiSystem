@@ -232,6 +232,29 @@
       border: 1px solid rgba(255, 255, 255, 0.6);
       flex-shrink: 0;
     }
+    /* 鳴動パターン：12 マスの横並びグリッド。左 3 マスは灰色・選択不可 */
+    .pattern-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 3px;
+    }
+    .pattern-cell {
+      aspect-ratio: 1 / 1;
+      min-width: 0;
+      padding: 0;
+      font-family: inherit;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .pattern-cell.is-on { background: #2fa8d8; border-color: #2fa8d8; }
+    .pattern-cell.is-fixed {
+      background: #4a4e54;
+      border-color: #4a4e54;
+      opacity: 0.55;
+      cursor: default;
+    }
+    .pattern-cell:disabled { cursor: default; }
     .ana-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .ana-row__label { font-size: 0.82rem; font-weight: 700; }
     .ana-row__value { font-size: 0.82rem; color: var(--muted); }
@@ -449,6 +472,14 @@
             </div>
 
             <div class="ana-block">
+              <p class="ana-block__label">鳴動パターン（左3マスは選択不可）</p>
+              <div class="pattern-grid" id="patternGrid"></div>
+              <p class="ana-block__label">周波数（Hz）</p>
+              <div class="opt-btns" id="freqBtns"></div>
+              <button type="button" class="confirm2 confirm2--wide" data-confirm="pattern">結果確定</button>
+            </div>
+
+            <div class="ana-block">
               <p class="ana-block__label">備考</p>
               <textarea class="notes-area" id="notesArea" placeholder="自由記述"></textarea>
               <button type="button" class="confirm2 confirm2--wide" id="notesUpdate">更新</button>
@@ -604,7 +635,11 @@
       const COLOR_OPTIONS = RC.COLOR_OPTIONS;
 
       function emptyRoom() {
-        return { stove: "", stoveDone: false, qr: "", injuryDone: false, color: "", colorDone: false, notes: "" };
+        return {
+          stove: "", stoveDone: false, qr: "", injuryDone: false,
+          color: "", colorDone: false, notes: "",
+          pattern: "", freq: "", patternDone: false,
+        };
       }
       let roomAnalysis = { A: emptyRoom(), B: emptyRoom(), C: emptyRoom() };
       const qrDetectedAt = { A: 0, B: 0, C: 0 };
@@ -619,9 +654,24 @@
       const stoveBtns = document.getElementById("stoveBtns");
       const colorBtns = document.getElementById("colorBtns");
       const notesArea = document.getElementById("notesArea");
+      const patternGrid = document.getElementById("patternGrid");
+      const freqBtns = document.getElementById("freqBtns");
       const stoveConfirm = document.querySelector('[data-confirm="stove"]');
       const injuryConfirm = document.querySelector('[data-confirm="injury"]');
       const colorConfirm = document.querySelector('[data-confirm="color"]');
+      const patternConfirm = document.querySelector('[data-confirm="pattern"]');
+
+      /* 鳴動パターン：12 マス（左 3 マスは選択不可・常に OFF）。
+         状態は "0"/"1" の 12 文字で room_analysis[room].pattern に保持。
+         周波数は damiyan の監視 12 周波数（frequencies.json）から選択。 */
+      const PATTERN_LEN = 12;
+      const PATTERN_FIXED = 3;
+      const FREQ_OPTIONS = [200, 260, 340, 440, 570, 740, 960, 1240, 1610, 2090, 2710, 3000];
+      function normPattern(p) {
+        let s = String(p || "").replace(/[^01]/g, "0").slice(0, PATTERN_LEN);
+        while (s.length < PATTERN_LEN) s += "0";
+        return "0".repeat(PATTERN_FIXED) + s.slice(PATTERN_FIXED);
+      }
       const notesUpdate = document.getElementById("notesUpdate");
       const qrValue = document.getElementById("qrValue");
       const qrAgo = document.getElementById("qrAgo");
@@ -667,6 +717,28 @@
         // 「読み取った分：秒」を表示（読取時刻を固定表示。次に読み取るまで保持される）。
         qrAgo.textContent = qrDetectedAt[activeRoom] ? RC.formatClockMMSS(qrDetectedAt[activeRoom]) : "—";
       }
+      function renderPattern() {
+        const s = cur();
+        const pat = normPattern(s.pattern);
+        patternGrid.innerHTML = pat.split("").map(function (c, i) {
+          const fixed = i < PATTERN_FIXED;
+          return (
+            '<button type="button" class="pattern-cell' +
+            (fixed ? " is-fixed" : c === "1" ? " is-on" : "") +
+            '" data-idx="' + i + '"' +
+            (fixed || s.patternDone ? " disabled" : "") +
+            ' aria-label="マス' + (i + 1) + '"></button>'
+          );
+        }).join("");
+        freqBtns.innerHTML = FREQ_OPTIONS.map(function (f) {
+          return (
+            '<button type="button" class="opt-btn' +
+            (String(s.freq) === String(f) ? " is-selected" : "") +
+            '" data-val="' + f + '"' + (s.patternDone ? " disabled" : "") + ">" + f + "</button>"
+          );
+        }).join("");
+        confirmBtn(patternConfirm, s.patternDone);
+      }
       function renderNotes() {
         if (document.activeElement !== notesArea) notesArea.value = cur().notes;
       }
@@ -680,6 +752,7 @@
         renderStove();
         renderInjury();
         renderColor();
+        renderPattern();
         renderNotes();
       }
 
@@ -796,6 +869,33 @@
         cur().colorDone = !cur().colorDone;
         renderColor();
         pushRoom({ color: cur().color, colorDone: cur().colorDone });
+      });
+      patternGrid.addEventListener("click", function (e) {
+        const btn = e.target.closest(".pattern-cell");
+        if (!btn || btn.disabled) return;
+        const i = parseInt(btn.dataset.idx, 10);
+        if (isNaN(i) || i < PATTERN_FIXED) return; // 左3マスは選択不可
+        const pat = normPattern(cur().pattern).split("");
+        pat[i] = pat[i] === "1" ? "0" : "1";
+        cur().pattern = pat.join("");
+        renderPattern();
+        pushRoom({ pattern: cur().pattern });
+      });
+      freqBtns.addEventListener("click", function (e) {
+        const btn = e.target.closest(".opt-btn");
+        if (!btn || btn.disabled) return;
+        cur().freq = btn.dataset.val;
+        renderPattern();
+        pushRoom({ freq: cur().freq });
+      });
+      patternConfirm.addEventListener("click", function () {
+        cur().patternDone = !cur().patternDone;
+        renderPattern();
+        pushRoom({
+          pattern: normPattern(cur().pattern),
+          freq: cur().freq,
+          patternDone: cur().patternDone,
+        });
       });
       notesArea.addEventListener("input", function () { cur().notes = notesArea.value; });
       notesUpdate.addEventListener("click", function () {
