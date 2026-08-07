@@ -143,6 +143,22 @@
     .item-row.is-updated .pair__k { color: #ffffff; background: rgba(0, 0, 0, 0.22); }
     .pair__v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* 鳴動パターンの小型 12 マス表示（左 3 マスは灰色＝選択不可を踏襲） */
+    .pgrid { display: inline-flex; gap: 2px; align-items: center; }
+    /* パターン表示のマスは pair__v の ellipsis クリップ対象にしない */
+    .pair__v:has(.pgrid) { overflow: visible; white-space: normal; }
+    .pgrid__c {
+      width: 12px;
+      height: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .pgrid__c.is-on { background: #2fa8d8; border-color: #2fa8d8; }
+    .pgrid__c.is-fixed { background: #4a4e54; border-color: #4a4e54; opacity: 0.55; }
+    .item-row.is-reported .pgrid__c,
+    .item-row.is-updated .pgrid__c { border-color: rgba(255, 255, 255, 0.5); }
+
     .cdot {
       display: inline-block;
       width: 12px;
@@ -227,6 +243,8 @@
       .item-row__value { font-size: 1.3rem; gap: 0.25rem 1.1rem; }
       .pair__k { font-size: 0.78rem; padding: 2px 9px; border-radius: 9px; }
       .cdot { width: 15px; height: 15px; margin-right: 7px; }
+      .pgrid { gap: 2px; }
+      .pgrid__c { width: 14px; height: 14px; }
       .chip { font-size: 0.82rem; padding: 4px 13px; border-radius: 12px; }
 
       .send-bar {
@@ -263,11 +281,13 @@
       const RC = window.RescueCommon;
       const ROOMS = ["A", "B", "C"];
       const ROOM_NAMES = RC.ROOM_NAMES;
-      // 報告項目行：1段目=ストーブ有無、（区切り線）、2段目=QR・顔色。
+      // 報告項目行：1段目=ストーブ有無、（区切り線）、2段目=QR・顔色、
+      // 3段目=鳴動パターン・周波数（解析側の結果確定後のみ値を表示）。
       // 備考はデータがある時のみ表示。
       const ITEMS = [
         { key: "stove", label: "ストーブ有無" },
         { key: "qrcolor", label: "QR / 顔色" },
+        { key: "pattern", label: "鳴動・周波数" },
         { key: "notes", label: "備考" },
       ];
       const ITEM_KEYS = ITEMS.map(function (i) { return i.key; });
@@ -284,7 +304,11 @@
 
       let roomAnalysis = { A: emptyA(), B: emptyA(), C: emptyA() };
       function emptyA() {
-        return { stove: "", stoveDone: false, qr: "", injuryDone: false, color: "", colorDone: false, notes: "" };
+        return {
+          stove: "", stoveDone: false, qr: "", injuryDone: false,
+          color: "", colorDone: false, notes: "",
+          pattern: "", freq: "", patternDone: false,
+        };
       }
 
       /* 報告状態（この端末ローカル）: reportState[room][key] = {reported, updated, sig} */
@@ -302,6 +326,9 @@
         if (key === "qrcolor") {
           return (a.qr || "") + "|" + (a.injuryDone ? "1" : "0") +
                  "||" + (a.color || "") + "|" + (a.colorDone ? "1" : "0");
+        }
+        if (key === "pattern") {
+          return (a.pattern || "") + "|" + (a.freq || "") + "|" + (a.patternDone ? "1" : "0");
         }
         if (key === "notes") return a.notes || "";
         return "";
@@ -327,6 +354,21 @@
             color = '<span class="cdot" style="background:' + hex + '"></span>' + esc(a.color);
           }
           return pairHtml("QR", qr) + pairHtml("顔色", color);
+        }
+        if (key === "pattern") {
+          // 鳴動パターン・周波数はストーブと同様、解析側の「結果確定」
+          // （patternDone）後のみ値を表示する。
+          if (!a.patternDone) return '<span class="muted">未確定</span>';
+          let pat = String(a.pattern || "").replace(/[^01]/g, "0").slice(0, 12);
+          while (pat.length < 12) pat += "0";
+          const grid = '<span class="pgrid">' + pat.split("").map(function (c, i) {
+            return '<span class="pgrid__c' +
+              (i < 3 ? " is-fixed" : c === "1" ? " is-on" : "") + '"></span>';
+          }).join("") + "</span>";
+          const freq = a.freq
+            ? esc(a.freq) + " Hz"
+            : '<span class="muted">—</span>';
+          return pairHtml("パターン", grid) + pairHtml("周波数", freq);
         }
         if (key === "notes") return a.notes ? esc(a.notes) : '<span class="muted">—</span>';
         return '<span class="muted">—</span>';
