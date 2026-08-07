@@ -338,18 +338,6 @@
       color: #ffffff;
       box-shadow: 0 0 12px rgba(216, 58, 58, 0.75);
     }
-    .notes-area {
-      width: 100%;
-      min-height: 70px;
-      padding: 0.45rem 0.5rem;
-      font-family: inherit;
-      font-size: 0.82rem;
-      color: var(--text);
-      background: var(--bg);
-      border: 1px solid var(--border);
-      resize: vertical;
-    }
-
     .master-overlay {
       position: fixed;
       inset: 0;
@@ -479,11 +467,9 @@
               <button type="button" class="confirm2 confirm2--wide" data-confirm="pattern">結果確定</button>
             </div>
 
-            <div class="ana-block">
-              <p class="ana-block__label">備考</p>
-              <textarea class="notes-area" id="notesArea" placeholder="自由記述"></textarea>
-              <button type="button" class="confirm2 confirm2--wide" id="notesUpdate">更新</button>
-            </div>
+            <!-- 備考（自由記述）はアナリティクスの入力 UI から削除。
+                 room_analysis[room].notes 自体はマスター画面のデモ/プリセットが
+                 書き込み、reporter が表示するため共有状態としては残置。 -->
           </div>
         </div>
       </aside>
@@ -653,7 +639,6 @@
 
       const stoveBtns = document.getElementById("stoveBtns");
       const colorBtns = document.getElementById("colorBtns");
-      const notesArea = document.getElementById("notesArea");
       const patternGrid = document.getElementById("patternGrid");
       const freqBtns = document.getElementById("freqBtns");
       const stoveConfirm = document.querySelector('[data-confirm="stove"]');
@@ -672,7 +657,6 @@
         while (s.length < PATTERN_LEN) s += "0";
         return "0".repeat(PATTERN_FIXED) + s.slice(PATTERN_FIXED);
       }
-      const notesUpdate = document.getElementById("notesUpdate");
       const qrValue = document.getElementById("qrValue");
       const qrAgo = document.getElementById("qrAgo");
 
@@ -739,9 +723,6 @@
         }).join("");
         confirmBtn(patternConfirm, s.patternDone);
       }
-      function renderNotes() {
-        if (document.activeElement !== notesArea) notesArea.value = cur().notes;
-      }
       function renderRoomTabs() {
         roomTabs.querySelectorAll(".room-tab").forEach(function (t) {
           t.classList.toggle("is-active", t.dataset.room === activeRoom);
@@ -753,7 +734,6 @@
         renderInjury();
         renderColor();
         renderPattern();
-        renderNotes();
       }
 
       roomTabs.addEventListener("click", function (e) {
@@ -897,14 +877,6 @@
           patternDone: cur().patternDone,
         });
       });
-      notesArea.addEventListener("input", function () { cur().notes = notesArea.value; });
-      notesUpdate.addEventListener("click", function () {
-        pushRoom({ notes: notesArea.value });
-        notesUpdate.classList.remove("is-flash");
-        void notesUpdate.offsetWidth;
-        notesUpdate.classList.add("is-flash");
-        setTimeout(function () { notesUpdate.classList.remove("is-flash"); }, 600);
-      });
 
       renderAnalysis();
 
@@ -947,9 +919,6 @@
           Object.keys(localQr).forEach(function (r) {
             if (localQr[r] && roomAnalysis[r] && !roomAnalysis[r].qr) roomAnalysis[r].qr = localQr[r];
           });
-          if (document.activeElement === notesArea) {
-            roomAnalysis[activeRoom].notes = notesArea.value;
-          }
           renderAnalysis();
         }
 
