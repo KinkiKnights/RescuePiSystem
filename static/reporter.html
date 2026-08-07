@@ -194,6 +194,60 @@
       border: 1px solid var(--border);
     }
     .send-bar .btn { width: auto; flex-shrink: 0; padding: 0.55rem 0.9rem; }
+
+    /* ---- iPad レイアウト（横 1180×820 / 縦 810×1080 を主対象）----
+       700px 以上で 3 ルームを横並びグリッドにして画面全体を使う。
+       文字・タップ領域も拡大。700px 未満（スマホ）は従来の縦積みのまま。 */
+    @media (min-width: 700px) {
+      .rp-header {
+        padding: calc(0.6rem + var(--safe-top)) 1.1rem 0.6rem;
+      }
+      .rp-header__title { font-size: 1.3rem; }
+      .rp-hint { font-size: 0.85rem; padding: 0.45rem 1rem; }
+
+      .rooms {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 0.8rem;
+        padding: 0.8rem 0.8rem calc(0.8rem + var(--safe-bottom));
+      }
+      .room { height: 100%; }
+
+      .room__head {
+        flex-wrap: wrap;
+        gap: 0.3rem 0.6rem;
+        padding: 0.85rem 0.95rem;
+      }
+      .room__name { font-size: 1.5rem; }
+      .room__sub { font-size: 0.85rem; }
+      .room__unit { font-size: 0.85rem; padding: 3px 12px; border-radius: 12px; }
+
+      /* 項目行は 2 段構成（ラベル行＋値/チップ行）にして行の高さ＝タップ領域を拡大 */
+      .item-row__track {
+        flex-wrap: wrap;
+        gap: 0.4rem 0.7rem;
+        padding: 0.95rem 0.95rem;
+      }
+      .item-row__label { width: 100%; font-size: 0.85rem; }
+      .item-row__value { font-size: 1.3rem; gap: 0.25rem 1.1rem; }
+      .pair__k { font-size: 0.78rem; padding: 2px 9px; border-radius: 9px; }
+      .cdot { width: 15px; height: 15px; margin-right: 7px; }
+      .chip { font-size: 0.82rem; padding: 4px 13px; border-radius: 12px; }
+
+      .send-bar {
+        padding: 0.6rem 0.9rem calc(0.65rem + var(--safe-bottom));
+        gap: 8px;
+      }
+      .send-bar input { font-size: 1.05rem; padding: 0.8rem; }
+      .send-bar .btn { font-size: 1.05rem; padding: 0.8rem 1.5rem; }
+    }
+
+    /* iPad 縦持ち等の中間幅（700〜980px）では列がやや狭いので値の文字を一段控えめに */
+    @media (min-width: 700px) and (max-width: 980px) {
+      .item-row__value { font-size: 1.15rem; }
+      .room__name { font-size: 1.3rem; }
+    }
   </style>
 </head>
 <body>
