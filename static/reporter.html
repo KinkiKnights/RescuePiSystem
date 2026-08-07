@@ -72,9 +72,10 @@
       transition: background 0.2s;
     }
     .room--done .room__head { background: var(--reported); }
-    .room__title { display: flex; align-items: baseline; gap: 0.4rem; }
-    .room__name { font-size: 1.05rem; font-weight: 700; }
-    .room__sub { font-size: 0.66rem; color: rgba(255, 255, 255, 0.82); }
+    /* ルームタイトルは 2 行表示：1 行目=ルーム名 / 2 行目=場所名（A=広場, B=暗室, C=2階） */
+    .room__title { display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem; }
+    .room__name { font-size: 1.05rem; font-weight: 700; line-height: 1.15; }
+    .room__sub { font-size: 0.66rem; color: rgba(255, 255, 255, 0.82); line-height: 1.15; }
     .room__unit {
       font-size: 0.66rem;
       font-weight: 700;
