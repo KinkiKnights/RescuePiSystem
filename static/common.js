@@ -456,18 +456,18 @@
     );
   }
 
-  // タスク一覧を targetEl に描画する。roomUnits で各ルームの対応号機バッジを出す。
+  // タスク一覧を targetEl に描画する。
+  // 「N号機対応中」バッジは表示廃止（room_units 状態と engineer の set_room 機能は
+  // サーバー側に残存。第3引数 roomUnits は互換のため受けるが未使用）。
   function renderTasks(targetEl, tasks, roomUnits) {
     const list = tasks || [];
-    const units = roomUnits || {};
     const common = list.filter(function (t) { return !t.room; });
     let html = "";
     if (common.length) html += renderTaskGroup("共通", common);
     ["A", "B", "C"].forEach(function (room) {
       const group = list.filter(function (t) { return t.room === room; });
       if (group.length) {
-        const badge = units[room] ? units[room] + "号機対応中" : null;
-        html += renderTaskGroup("ルーム" + room, group, badge);
+        html += renderTaskGroup("ルーム" + room, group);
       }
     });
     targetEl.innerHTML = html;

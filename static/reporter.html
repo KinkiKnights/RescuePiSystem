@@ -76,16 +76,6 @@
     .room__title { display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem; }
     .room__name { font-size: 1.05rem; font-weight: 700; line-height: 1.15; }
     .room__sub { font-size: 0.66rem; color: rgba(255, 255, 255, 0.82); line-height: 1.15; }
-    .room__unit {
-      font-size: 0.66rem;
-      font-weight: 700;
-      color: #ffffff;
-      background: rgba(0, 0, 0, 0.28);
-      padding: 1px 8px;
-      border-radius: 9px;
-    }
-    .room__unit--none { color: rgba(255, 255, 255, 0.85); }
-
     .room__items { display: flex; flex-direction: column; }
 
     /* 各報告項目行：タップでトグル（報告済み＝緑背景 / 報告後にデータ更新＝橙背景） */
@@ -222,7 +212,6 @@
       }
       .room__name { font-size: 1.5rem; }
       .room__sub { font-size: 0.85rem; }
-      .room__unit { font-size: 0.85rem; padding: 3px 12px; border-radius: 12px; }
 
       /* 項目行は 2 段構成（ラベル行＋値/チップ行）にして行の高さ＝タップ領域を拡大 */
       .item-row__track {
@@ -288,7 +277,6 @@
 
       function esc(s) { return RC.escapeHtml(s); }
 
-      let roomUnits = { A: 0, B: 0, C: 0 };
       let roomAnalysis = { A: emptyA(), B: emptyA(), C: emptyA() };
       function emptyA() {
         return { stove: "", stoveDone: false, qr: "", injuryDone: false, color: "", colorDone: false, notes: "" };
@@ -353,10 +341,6 @@
 
       function roomSectionHtml(r) {
         const a = roomAnalysis[r] || emptyA();
-        const unit = roomUnits[r];
-        const unitBadge = unit
-          ? '<span class="room__unit">' + unit + '号機対応中</span>'
-          : '<span class="room__unit room__unit--none">未割当</span>';
         const rows = visibleKeys(r).map(function (k) {
           const item = ITEMS.filter(function (it) { return it.key === k; })[0];
           const rs = reportState[r][k];
@@ -376,7 +360,7 @@
           '<div class="room__head"><div class="room__title">' +
           '<span class="room__name">ルーム' + r + '</span>' +
           '<span class="room__sub">' + ROOM_NAMES[r] + '</span></div>' +
-          unitBadge + "</div>" +
+          "</div>" +
           '<div class="room__items">' + rows + "</div></section>"
         );
       }
@@ -406,7 +390,6 @@
 
       /* ---- サーバー状態反映：報告済み項目が更新されたら未報告＋更新バッジ ---- */
       function applyState(st) {
-        if (st.room_units) roomUnits = st.room_units;
         if (st.room_analysis) roomAnalysis = st.room_analysis;
         ROOMS.forEach(function (r) {
           const a = roomAnalysis[r] || emptyA();
