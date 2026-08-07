@@ -78,6 +78,10 @@
     .room__sub { font-size: 0.66rem; color: rgba(255, 255, 255, 0.82); line-height: 1.15; }
     .room__items { display: flex; flex-direction: column; }
 
+    /* ストーブ行と QR・顔色行の間の区切り線（<hr> 相当） */
+    .room__divider { border-top: 2px solid rgba(255, 255, 255, 0.35); }
+    .room__divider + .item-row { border-top: none; }
+
     /* 各報告項目行：タップでトグル（報告済み＝緑背景 / 報告後にデータ更新＝橙背景） */
     .item-row {
       border-top: 1px solid rgba(255, 255, 255, 0.18);
@@ -259,10 +263,11 @@
       const RC = window.RescueCommon;
       const ROOMS = ["A", "B", "C"];
       const ROOM_NAMES = RC.ROOM_NAMES;
-      // 報告項目行：QR とストーブは同一行に統合。備考はデータがある時のみ表示。
+      // 報告項目行：1段目=ストーブ有無、（区切り線）、2段目=QR・顔色。
+      // 備考はデータがある時のみ表示。
       const ITEMS = [
-        { key: "qrstove", label: "QR / ストーブ" },
-        { key: "color", label: "顔色" },
+        { key: "stove", label: "ストーブ有無" },
+        { key: "qrcolor", label: "QR / 顔色" },
         { key: "notes", label: "備考" },
       ];
       const ITEM_KEYS = ITEMS.map(function (i) { return i.key; });
@@ -291,11 +296,13 @@
 
       function sigOf(a, key) {
         if (!a) return "";
-        if (key === "qrstove") {
-          return (a.qr || "") + "|" + (a.injuryDone ? "1" : "0") +
-                 "||" + (a.stove || "") + "|" + (a.stoveDone ? "1" : "0");
+        if (key === "stove") {
+          return (a.stove || "") + "|" + (a.stoveDone ? "1" : "0");
         }
-        if (key === "color") return (a.color || "") + "|" + (a.colorDone ? "1" : "0");
+        if (key === "qrcolor") {
+          return (a.qr || "") + "|" + (a.injuryDone ? "1" : "0") +
+                 "||" + (a.color || "") + "|" + (a.colorDone ? "1" : "0");
+        }
         if (key === "notes") return a.notes || "";
         return "";
       }
@@ -304,20 +311,22 @@
         return '<span class="pair"><span class="pair__k">' + k + '</span><span class="pair__v">' + valHtml + '</span></span>';
       }
       function itemValueHtml(a, key) {
-        if (key === "qrstove") {
-          const qr = a.qr ? esc(a.qr) : '<span class="muted">読み取り中</span>';
+        if (key === "stove") {
           // ストーブ有無は解析側の「結果確定」（stoveDone）後の値のみ表示する。
           // 未確定の選択途中の値は報告対象にしない（確定されると WS 配信で反映され、
           // 報告済みの行は sigOf の変化検知により「更新」バッジ＋未報告へ戻る）。
-          const stove = a.stoveDone
+          return a.stoveDone
             ? (a.stove ? esc(a.stove) : '<span class="muted">—</span>')
             : '<span class="muted">未確定</span>';
-          return pairHtml("QR", qr) + pairHtml("ストーブ", stove);
         }
-        if (key === "color") {
-          if (!a.color) return '<span class="muted">—</span>';
-          const hex = COLOR_HEX[a.color] || "#888888";
-          return '<span class="cdot" style="background:' + hex + '"></span>' + esc(a.color);
+        if (key === "qrcolor") {
+          const qr = a.qr ? esc(a.qr) : '<span class="muted">読み取り中</span>';
+          let color = '<span class="muted">—</span>';
+          if (a.color) {
+            const hex = COLOR_HEX[a.color] || "#888888";
+            color = '<span class="cdot" style="background:' + hex + '"></span>' + esc(a.color);
+          }
+          return pairHtml("QR", qr) + pairHtml("顔色", color);
         }
         if (key === "notes") return a.notes ? esc(a.notes) : '<span class="muted">—</span>';
         return '<span class="muted">—</span>';
@@ -342,10 +351,13 @@
       function roomSectionHtml(r) {
         const a = roomAnalysis[r] || emptyA();
         const rows = visibleKeys(r).map(function (k) {
+          // ストーブ行と QR・顔色行の間に区切り線（<hr> 相当）を入れる
+          const divider = k === "qrcolor" ? '<div class="room__divider"></div>' : "";
           const item = ITEMS.filter(function (it) { return it.key === k; })[0];
           const rs = reportState[r][k];
           const cls = "item-row" + (rs.reported ? " is-reported" : "") + (rs.updated ? " is-updated" : "");
           return (
+            divider +
             '<div class="' + cls + '" data-room="' + r + '" data-key="' + k + '">' +
             '<div class="item-row__track">' +
             '<span class="item-row__label">' + item.label + '</span>' +
