@@ -38,6 +38,14 @@
     .right-col .panel--ctrl {
       flex: 1;
     }
+    /* 未選択時の再起動/シャットダウン等：無効ボタンの視覚表現 */
+    #unitReboot:disabled,
+    #unitShutdown:disabled {
+      opacity: 0.4;
+      cursor: default;
+      pointer-events: none;
+    }
+
     .unit-select {
       flex: 1;
       display: flex;
@@ -642,7 +650,9 @@
 
       // 機体選択はこの画面（クライアント）ローカル。サーバー共有状態には載せず、
       // 他のユーザーの画面には影響しない。
-      let selectedUnit = 1;
+      // 初期状態は「未選択」（0）：映像・joy とも接続せず、ユーザーが機体選択
+      // ボタンを押して初めて接続を確立する。選択中ボタンの再タップで未選択に戻る。
+      let selectedUnit = 0;
       let latestState = {};
 
       function renderUnitSelect(st) {
@@ -901,15 +911,22 @@
         ws.onerror = function () {};
       }
 
-      // 選択中号機の IP へ joy 接続を追従させる（選択変更・unit_ips 更新の両方から呼ぶ）
+      // 選択中号機の IP へ joy 接続を追従させる（選択変更・unit_ips 更新の両方から呼ぶ）。
+      // 未選択（selectedUnit=0）の間はどこへも接続しない。
       function updateJoyTarget() {
         const unitIps = latestState.unit_ips || {};
-        const newIp = unitIps[selectedUnit] || "";
+        const newIp = selectedUnit ? unitIps[selectedUnit] || "" : "";
         if (newIp !== joyCurrentIp) {
           joyCurrentIp = newIp;
           connectJoy(newIp);
         }
+        if (!selectedUnit) {
+          joyWsStatus.textContent = "joy: 機体未選択";
+        } else if (!newIp) {
+          joyWsStatus.textContent = "joy: 未接続（IP不明）";
+        }
       }
+      updateJoyTarget(); // 初期表示（未選択）：接続せず「機体未選択」を明示
 
       setInterval(function () {
         if (!joyWs || joyWs.readyState !== WebSocket.OPEN) return;
@@ -925,7 +942,7 @@
       }, 16);  // ~60Hz heartbeat: send current controller state every cycle (no change-based coalescing) so signal loss is distinguishable from 'no input'
 
       let viewMode = "both"; // "a" = 操作機のみ / "b" = 天カメのみ / "both" = 2画面
-      let videoUnitA = 1;
+      let videoUnitA = 0; // 0 = 未選択（操作機映像に接続しない）
       let webrtcServer = "";
 
       const OVERHEAD_UNIT = 1; // 天カメ = 1号機のカメラ
@@ -934,18 +951,28 @@
         return RC.videoBox(OVERHEAD_UNIT, "", { label: "天カメ（1号機）" });
       }
 
+      // 未選択時の操作機枠（映像へは接続しない・video 要素を持たないプレースホルダ）
+      function emptyOperatorBox() {
+        return (
+          '<div class="video-box"><span class="video-box__label">操作機</span>' +
+          '<span class="video-box__placeholder">機体未選択</span></div>'
+        );
+      }
+
       function renderVideo() {
         let html;
         let label;
+        const aBox = videoUnitA ? RC.videoBox(videoUnitA) : emptyOperatorBox();
+        const aLabel = videoUnitA ? videoUnitA + "号機" : "未選択";
         if (viewMode === "a") {
-          html = RC.videoBox(videoUnitA);
-          label = "操作機（" + videoUnitA + "号機）";
+          html = aBox;
+          label = "操作機（" + aLabel + "）";
         } else if (viewMode === "b") {
           html = overheadBox();
           label = "天カメ（1号機）";
         } else {
-          html = RC.videoBox(videoUnitA) + overheadBox();
-          label = "操作機（" + videoUnitA + "号機）＋ 天カメ";
+          html = aBox + overheadBox();
+          label = "操作機（" + aLabel + "）＋ 天カメ";
         }
         videoUnitLabel.textContent = label;
         mainVideo.classList.toggle("is-dual", viewMode === "both");
@@ -1008,9 +1035,10 @@
         },
       });
 
-      // 機体選択をこのクライアント内だけで反映する（サーバーへは送らない）
+      // 機体選択をこのクライアント内だけで反映する（サーバーへは送らない）。
+      // unit=0 は「未選択」（映像・joy とも切断、再起動/シャットダウン無効）。
       function applyLocalSelection(unit) {
-        if (unit < 1 || unit > 5) return;
+        if (unit < 0 || unit > 5) return;
         selectedUnit = unit;
         renderUnitSelect(latestState);
         if (selectedUnit !== videoUnitA) {
@@ -1018,6 +1046,7 @@
           renderVideo();
         }
         updateJoyTarget();
+        updatePowerButtons();
       }
 
       // 操縦要請の受諾：サーバーの pending をクリアしつつ、自画面の選択を要請号機へ
@@ -1032,7 +1061,8 @@
           acceptControlRequest();
           return;
         }
-        applyLocalSelection(unit);
+        // 選択中の機体を再タップしたら未選択に戻す（選択解除）
+        applyLocalSelection(unit === selectedUnit ? 0 : unit);
       }
 
       document.addEventListener("keydown", function (e) {
@@ -1066,12 +1096,19 @@
         acceptControlRequest();
       });
 
-      // ---- 再起動 / シャットダウン（操作中の号機へ POST・確認ダイアログ付き）----
+      // ---- 再起動 / シャットダウン（選択中の号機へ POST・確認ダイアログ付き）----
+      // 未選択時は対象がないため両ボタンとも無効化（誤操作防止）。
       const unitRebootBtn = document.getElementById("unitReboot");
       const unitShutdownBtn = document.getElementById("unitShutdown");
 
+      function updatePowerButtons() {
+        unitRebootBtn.disabled = !selectedUnit;
+        unitShutdownBtn.disabled = !selectedUnit;
+      }
+
       function powerAction(kind) {
         const unit = selectedUnit; // この画面で選択中の号機（クライアントローカル）を明示指定
+        if (!unit) return; // 未選択時は何もしない（ボタンも無効化済み）
         const label = kind === "shutdown" ? "シャットダウン" : "再起動";
         if (!window.confirm(unit + "号機を" + label + "します。よろしいですか？")) return;
         const path = kind === "shutdown" ? "/api/unit/shutdown" : "/api/unit/reboot";
@@ -1098,6 +1135,7 @@
 
       unitRebootBtn.addEventListener("click", function () { powerAction("reboot"); });
       unitShutdownBtn.addEventListener("click", function () { powerAction("shutdown"); });
+      updatePowerButtons(); // 初期状態（未選択）では無効
     })();
   </script>
   <script src="/voice/voice-client.js"></script>
