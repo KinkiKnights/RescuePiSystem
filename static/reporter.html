@@ -143,16 +143,31 @@
     .item-row.is-updated .pair__k { color: #ffffff; background: rgba(0, 0, 0, 0.22); }
     .pair__v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    /* 鳴動パターンの小型 12 マス表示（左 3 マスは灰色＝選択不可を踏襲） */
-    .pgrid { display: inline-flex; gap: 2px; align-items: center; }
-    /* パターン表示のマスは pair__v の ellipsis クリップ対象にしない */
-    .pair__v:has(.pgrid) { overflow: visible; white-space: normal; }
+    /* 鳴動パターンの小型 12 マス表示（左 3 マスは灰色＝選択不可を踏襲）。
+       マスは固定 px にせずコンテナ幅に追従して縮小し、12 マス 1 行を常に維持
+       （狭いカラム幅ではみ出さない）。 */
+    .pair--pattern {
+      flex: 1 1 100%;
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .pgrid {
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 200px;
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 2px;
+      align-items: center;
+    }
     .pgrid__c {
-      width: 12px;
-      height: 12px;
+      width: 100%;
+      aspect-ratio: 1 / 1;
       border: 1px solid var(--border);
       background: var(--bg);
-      flex-shrink: 0;
+      min-width: 0;
     }
     .pgrid__c.is-on { background: #2fa8d8; border-color: #2fa8d8; }
     .pgrid__c.is-fixed { background: #4a4e54; border-color: #4a4e54; opacity: 0.55; }
@@ -243,8 +258,8 @@
       .item-row__value { font-size: 1.3rem; gap: 0.25rem 1.1rem; }
       .pair__k { font-size: 0.78rem; padding: 2px 9px; border-radius: 9px; }
       .cdot { width: 15px; height: 15px; margin-right: 7px; }
-      .pgrid { gap: 2px; }
-      .pgrid__c { width: 14px; height: 14px; }
+      /* iPad ではマス最大 16px 相当まで拡大可（幅が足りなければ自動縮小） */
+      .pgrid { max-width: 240px; }
       .chip { font-size: 0.82rem; padding: 4px 13px; border-radius: 12px; }
 
       .send-bar {
@@ -368,7 +383,11 @@
           const freq = a.freq
             ? esc(a.freq) + " Hz"
             : '<span class="muted">—</span>';
-          return pairHtml("パターン", grid) + pairHtml("周波数", freq);
+          // パターンは pair__v（ellipsis・nowrap）を使わず幅追従の専用ペアで表示
+          return (
+            '<span class="pair pair--pattern"><span class="pair__k">パターン</span>' +
+            grid + "</span>" + pairHtml("周波数", freq)
+          );
         }
         if (key === "notes") return a.notes ? esc(a.notes) : '<span class="muted">—</span>';
         return '<span class="muted">—</span>';
