@@ -117,6 +117,22 @@ html, body {
   display: none;
 }
 
+/* 表示回転（KK03 など。common.js の UNIT_ROTATION で号機を指定）。
+   横長ソースを時計回り 90 度回転し、枠内に収める（レターボックス）。
+   コンテナクエリ単位で幅・高さを入れ替えて配置してから回転する。 */
+.video-box--rot90 {
+  container-type: size;
+}
+.video-box--rot90 video {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  transform: translate(-50%, -50%) rotate(90deg);
+  object-fit: contain;
+}
+
 .video-box__label {
   position: absolute;
   left: 6px;

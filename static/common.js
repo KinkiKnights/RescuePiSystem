@@ -18,11 +18,19 @@
       .replace(/"/g, "&quot;");
   }
 
+  // ---- 表示回転（表示側のみ・配信映像は横長のまま）----
+  // 号機番号 → 時計回りの回転角（度）。現状 KK03 のみ 90 度。
+  // 実装は common.css の .video-box--rot90（枠内レターボックス収め）。
+  const UNIT_ROTATION = { 3: 90 };
+
   function videoBox(unitOrOverview, extraClass, opts) {
     opts = opts || {};
-    const cls = extraClass ? " " + extraClass : "";
+    let cls = extraClass ? " " + extraClass : "";
     const isOverview =
       unitOrOverview === "overview" || opts.kind === "overview";
+    if (!isOverview && UNIT_ROTATION[Number(unitOrOverview)] === 90) {
+      cls += " video-box--rot90";
+    }
     const label = isOverview
       ? opts.label || "全体カメラ"
       : opts.label || (Number(unitOrOverview) || 1) + "号機";
@@ -519,5 +527,6 @@
     ROOM_NAMES: ROOM_NAMES,
     COLOR_OPTIONS: COLOR_OPTIONS,
     COLORS: COLORS,
+    UNIT_ROTATION: UNIT_ROTATION,
   };
 })(window);
