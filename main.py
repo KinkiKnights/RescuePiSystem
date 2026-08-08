@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import platform
+import shlex
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -696,6 +699,9 @@ class AppState:
         # 5号機 自動走行の状態（サーバー権威・全モード共有）。
         # "off"=消灯（既定）/ "armed"=点滅（暗室座標が入力/変更された）/ "lit"=点灯（自動走行中）。
         self.unit5_auto_run: str = "off"
+        # ルーム別の周波数候補（12 個・Hz）。reporter が入力し、damiyan 検出器の
+        # 設定ファイル書き出し＋プロセス再起動で反映する。空リスト=未入力。
+        self.room_frequencies: dict[str, list[float]] = {"A": [], "B": [], "C": []}
         self.lock = asyncio.Lock()
 
     def snapshot(self) -> dict[str, Any]:
@@ -720,6 +726,7 @@ class AppState:
                 side: dict(v) for side, v in self.dark_room_offset.items()
             },
             "unit5_auto_run": self.unit5_auto_run,
+            "room_frequencies": {r: list(v) for r, v in self.room_frequencies.items()},
         }
 
     async def push_notification(self, text: str) -> None:
@@ -756,6 +763,9 @@ class AppState:
         self.field_side = None
         # 5号機 自動走行もランタイム状態のためリセットで消灯へ戻す
         self.unit5_auto_run = "off"
+        # 周波数候補もランタイム入力のためリセットで未入力へ戻す
+        # （検出器は再起動しない＝直近の設定ファイルのまま動き続ける）
+        self.room_frequencies = {"A": [], "B": [], "C": []}
         # 号機 IP は固定設定のためリセットしない（config.json の値を維持）
         # 暗室座標オフセットは原点校正（フィールド固有の設定値）のためリセットで消さない
 
@@ -1046,6 +1056,140 @@ async def post_units_shutdown_all() -> Any:
     return await _units_power_all("shutdown")
 
 
+# ===== damiyan 検出器の周波数設定（reporter からのルーム別 12 周波数入力） =====
+# 検出器（unit3/4/5、web :8771-8773）は起動時に -f の JSON を読む作りで、実行中の
+# 変更 API は無い（web_server.py は GET のみ）。よって「号機別ファイル書き出し＋
+# プロセス再起動」で反映する。起動コマンドは all_start.bash と同一形式:
+#   uv run damiyan-detector -f <file> --stream 127.0.0.1:500N --label unitN
+#     --web 877N --web-host 0.0.0.0   （cwd=DAMIYAN_DIR、kk ユーザー）
+DAMIYAN_DIR = "/home/kk/kk_ws/src/damiyan-signal-processing"
+DAMIYAN_LOG_DIR = "/home/kk/kk_ws/logs"
+DAMIYAN_FREQ_COUNT = 12
+DAMIYAN_FREQ_MIN_HZ = 200.0
+DAMIYAN_FREQ_MAX_HZ = 3000.0
+DAMIYAN_FREQ_SPACING_HZ = 40.0  # cli.py validate_frequencies と同じ制約
+DAMIYAN_UNITS = (3, 4, 5)  # 検出器が存在する号機
+_damiyan_lock = asyncio.Lock()  # 検出器再起動の直列化
+
+
+def _validate_room_frequencies(raw: Any) -> tuple[list[float] | None, str]:
+    """reporter 入力の周波数リストを damiyan と同じ制約で検証する。"""
+    try:
+        freqs = [float(x) for x in raw]
+    except (TypeError, ValueError):
+        return None, "周波数は数値 12 個の配列で指定してください"
+    if len(freqs) != DAMIYAN_FREQ_COUNT:
+        return None, f"周波数は {DAMIYAN_FREQ_COUNT} 個必要です（{len(freqs)} 個）"
+    for f in freqs:
+        if not (DAMIYAN_FREQ_MIN_HZ <= f <= DAMIYAN_FREQ_MAX_HZ):
+            return None, f"{f:g} Hz が範囲外です（{DAMIYAN_FREQ_MIN_HZ:g}〜{DAMIYAN_FREQ_MAX_HZ:g} Hz）"
+    s = sorted(freqs)
+    for a, b in zip(s, s[1:]):
+        if b - a < DAMIYAN_FREQ_SPACING_HZ:
+            return None, f"{a:g} Hz と {b:g} Hz が近すぎます（{DAMIYAN_FREQ_SPACING_HZ:g} Hz 以上離す）"
+    return freqs, ""
+
+
+def _write_damiyan_freq_file(unit: int, freqs: list[float], room: str) -> str:
+    """号機別の周波数ファイルを damiyan 既存フォーマットで書き出す。
+
+    共有の frequencies.json はフォールバックとして触らない。
+    """
+    path = f"{DAMIYAN_DIR}/frequencies_unit{unit}.json"
+    payload = {
+        "_source": f"VideoControl reporter 入力（ルーム{room} → unit{unit}）",
+        "frequencies": freqs,
+    }
+    with open(path, "w", encoding="utf-8") as fp:
+        json.dump(payload, fp, ensure_ascii=False, indent=2)
+        fp.write("\n")
+    try:
+        import shutil
+
+        shutil.chown(path, "kk", "kk")
+    except Exception:
+        pass  # 所有者変更は必須ではない（644 で kk から読める）
+    return path
+
+
+def _restart_damiyan_detector_sync(unit: int, freq_file: str) -> tuple[bool, str]:
+    """指定号機の検出器を停止し、新しい周波数ファイルで起動し直す（同期）。
+
+    多重起動防止のため pkill → 消滅確認（必要なら SIGKILL）→ 起動 → :877N の
+    応答復帰を最大 25 秒待つ。VideoControl は root 稼働のため、検出器は従来と
+    同じ kk ユーザーで起動する（runuser + login shell で uv の PATH も解決）。
+    """
+    stream = 5000 + unit
+    web = 8768 + unit
+    label = f"unit{unit}"
+    pat = f"damiyan-detector.*--label {label}"
+    log = f"{DAMIYAN_LOG_DIR}/damiyan_{label}_reporter.log"
+
+    subprocess.run(["pkill", "-f", pat], check=False)
+    for _ in range(20):  # 最大 5 秒待って確実に停止
+        if subprocess.run(["pgrep", "-f", pat], capture_output=True).returncode != 0:
+            break
+        time.sleep(0.25)
+    else:
+        subprocess.run(["pkill", "-9", "-f", pat], check=False)
+        time.sleep(0.5)
+
+    inner = (
+        f"mkdir -p {shlex.quote(DAMIYAN_LOG_DIR)} && cd {shlex.quote(DAMIYAN_DIR)} && "
+        f"nohup uv run damiyan-detector -f {shlex.quote(freq_file)} "
+        f"--stream 127.0.0.1:{stream} --label {label} --web {web} --web-host 0.0.0.0 "
+        f">> {shlex.quote(log)} 2>&1 &"
+    )
+    if os.geteuid() == 0:
+        cmd = ["runuser", "-u", "kk", "--", "bash", "-lc", inner]
+    else:
+        cmd = ["bash", "-lc", inner]
+    subprocess.run(cmd, check=False)
+
+    deadline = time.time() + 25
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{web}/", timeout=2) as resp:
+                if 200 <= resp.status < 500:
+                    return True, f"再起動完了（:{web} 応答確認）"
+        except Exception:
+            time.sleep(0.5)
+    return False, f"再起動後 :{web} が応答しません（ログ: {log}）"
+
+
+async def _deploy_room_frequencies(rooms: list[str]) -> None:
+    """指定ルームの周波数を対応検出器へ反映（ファイル書き出し＋再起動）する。
+
+    バックグラウンドタスクとして実行し、結果はルームごとに通知バーへ流す。
+    """
+    async with _damiyan_lock:
+        for room in rooms:
+            async with state.lock:
+                unit = int(state.room_units.get(room, 0) or 0)
+                freqs = list(state.room_frequencies.get(room) or [])
+            if not freqs:
+                continue
+            if unit not in DAMIYAN_UNITS:
+                await state.push_notification(
+                    f"周波数反映不可: ルーム{room} の対応号機"
+                    f"（{unit or '未割当'}）に検出器がありません"
+                )
+                await broadcast({"type": "state", "payload": state.snapshot()})
+                continue
+            try:
+                path = await asyncio.to_thread(
+                    _write_damiyan_freq_file, unit, freqs, room
+                )
+                ok, msg = await asyncio.to_thread(
+                    _restart_damiyan_detector_sync, unit, path
+                )
+            except Exception as exc:
+                ok, msg = False, f"内部エラー: {exc}"
+            head = "周波数反映OK" if ok else "周波数反映失敗"
+            await state.push_notification(f"{head}: ルーム{room}（unit{unit}）{msg}")
+            await broadcast({"type": "state", "payload": state.snapshot()})
+
+
 @app.post("/api/units/reboot_all")
 async def post_units_reboot_all() -> Any:
     """全号機を master-control API 経由で一斉再起動する。"""
@@ -1239,6 +1383,37 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
                     if key in msg:
                         ra[key] = bool(msg[key])
                 changed = True
+
+    elif msg_type == "set_room_frequencies":
+        # reporter からのルーム別 12 周波数入力。検証 → 共有状態更新 → 検出器へ
+        # 反映（バックグラウンド）。「最初の入力」（全ルーム未入力からの入力）は
+        # 3 ルームすべてへ展開して 3 検出器を再起動、以降は該当ルームのみ。
+        room = str(msg.get("room", ""))
+        freqs, err = _validate_room_frequencies(msg.get("frequencies", []))
+        if room not in ("A", "B", "C"):
+            await state.push_notification(f"周波数入力エラー: ルーム指定が不正です（{room}）")
+            changed = True
+        elif freqs is None:
+            await state.push_notification(f"周波数入力エラー: {err}")
+            changed = True
+        else:
+            async with state.lock:
+                first_input = all(
+                    not state.room_frequencies.get(r) for r in ("A", "B", "C")
+                )
+                if first_input:
+                    for r in ("A", "B", "C"):
+                        state.room_frequencies[r] = list(freqs)
+                    rooms = ["A", "B", "C"]
+                else:
+                    state.room_frequencies[room] = list(freqs)
+                    rooms = [room]
+                changed = True
+            label = "（初回入力のため3ルームへ展開）" if first_input else ""
+            await state.push_notification(
+                f"ルーム{room} 周波数を受付{label}。検出器へ反映中…"
+            )
+            asyncio.create_task(_deploy_room_frequencies(rooms))
 
     elif msg_type == "set_unit_qr":
         # 号機ごとの自動QR検出を共有状態（units[n]）へ反映する（確定ゲート無し）。
