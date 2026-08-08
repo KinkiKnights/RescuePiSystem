@@ -618,7 +618,7 @@ def _default_room_analysis() -> dict[str, dict[str, Any]]:
             # 鳴動パターン：12 マスの ON/OFF を "0"/"1" の 12 文字で保持
             # （左 3 マスは UI 上選択不可で常に "0"）。
             "pattern": "",
-            # 周波数：damiyan の監視 12 周波数（frequencies.json）から選択した値（Hz、文字列）
+            # 周波数：damiyan の監視周波数（初期 8 個、frequencies.json）から選択した値（Hz、文字列）
             "freq": "",
             # 鳴動パターン・周波数の結果確定フラグ（stoveDone 等と同じ確定ゲート）
             "patternDone": False,
@@ -1064,7 +1064,7 @@ async def post_units_shutdown_all() -> Any:
 #     --web 877N --web-host 0.0.0.0   （cwd=DAMIYAN_DIR、kk ユーザー）
 DAMIYAN_DIR = "/home/kk/kk_ws/src/damiyan-signal-processing"
 DAMIYAN_LOG_DIR = "/home/kk/kk_ws/logs"
-DAMIYAN_FREQ_COUNT = 12
+DAMIYAN_FREQ_COUNT_MAX = 12  # cli.py validate_frequencies は 1〜12 個を受理
 DAMIYAN_FREQ_MIN_HZ = 200.0
 DAMIYAN_FREQ_MAX_HZ = 3000.0
 DAMIYAN_FREQ_SPACING_HZ = 40.0  # cli.py validate_frequencies と同じ制約
@@ -1077,9 +1077,9 @@ def _validate_room_frequencies(raw: Any) -> tuple[list[float] | None, str]:
     try:
         freqs = [float(x) for x in raw]
     except (TypeError, ValueError):
-        return None, "周波数は数値 12 個の配列で指定してください"
-    if len(freqs) != DAMIYAN_FREQ_COUNT:
-        return None, f"周波数は {DAMIYAN_FREQ_COUNT} 個必要です（{len(freqs)} 個）"
+        return None, "周波数は数値（1〜12 個）の配列で指定してください"
+    if not (1 <= len(freqs) <= DAMIYAN_FREQ_COUNT_MAX):
+        return None, f"周波数は 1〜{DAMIYAN_FREQ_COUNT_MAX} 個で指定してください（{len(freqs)} 個）"
     for f in freqs:
         if not (DAMIYAN_FREQ_MIN_HZ <= f <= DAMIYAN_FREQ_MAX_HZ):
             return None, f"{f:g} Hz が範囲外です（{DAMIYAN_FREQ_MIN_HZ:g}〜{DAMIYAN_FREQ_MAX_HZ:g} Hz）"
@@ -1385,7 +1385,7 @@ async def apply_client_message(msg: dict[str, Any]) -> None:
                 changed = True
 
     elif msg_type == "set_room_frequencies":
-        # reporter からのルーム別 12 周波数入力。検証 → 共有状態更新 → 検出器へ
+        # reporter からのルーム別周波数入力（1〜12 個）。検証 → 共有状態更新 → 検出器へ
         # 反映（バックグラウンド）。「最初の入力」（全ルーム未入力からの入力）は
         # 3 ルームすべてへ展開して 3 検出器を再起動、以降は該当ルームのみ。
         room = str(msg.get("room", ""))

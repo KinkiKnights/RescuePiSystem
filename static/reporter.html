@@ -221,7 +221,7 @@
     }
     .send-bar .btn { width: auto; flex-shrink: 0; padding: 0.55rem 0.9rem; }
 
-    /* ルーム別 周波数候補（12個）入力：damiyan 検出器へ反映される */
+    /* ルーム別 周波数候補（1〜12個、初期 8 個）入力：damiyan 検出器へ反映される */
     .freq-set {
       border-top: 1px solid rgba(255, 255, 255, 0.18);
       padding: 0.5rem 0.6rem;
@@ -372,7 +372,7 @@
         };
       }
 
-      /* ルーム別 周波数候補（共有状態 room_frequencies）。入力は 12 個の Hz。 */
+      /* ルーム別 周波数候補（共有状態 room_frequencies）。入力は 1〜12 個の Hz（初期は 8 個）。 */
       let roomFrequencies = { A: [], B: [], C: [] };
 
       /* 報告状態（この端末ローカル）: reportState[room][key] = {reported, updated, sig} */
@@ -482,7 +482,7 @@
           '<div class="freq-set" data-room="' + r + '">' +
           '<span class="freq-set__label">周波数候補</span>' +
           '<input class="freq-set__field" data-room="' + r +
-          '" inputmode="decimal" placeholder="12個（カンマ/空白区切り Hz）" />' +
+          '" inputmode="decimal" placeholder="例: 349 494 659 784 1047 1175 1760 1976" />' +
           '<button type="button" class="freq-set__btn" data-room="' + r + '">設定</button>' +
           '<p class="freq-set__current">' +
           (fr.length
@@ -552,8 +552,8 @@
       function parseFrequencies(text) {
         const parts = String(text || "").trim().split(/[\s,、]+/).filter(Boolean);
         const nums = parts.map(Number);
-        if (nums.length !== 12 || nums.some(isNaN)) {
-          return { error: "12 個の数値（Hz）をカンマか空白区切りで入力してください（現在 " + parts.length + " 個）" };
+        if (nums.length < 1 || nums.length > 12 || nums.some(isNaN)) {
+          return { error: "1〜12 個の数値（Hz）をカンマか空白区切りで入力してください（現在 " + parts.length + " 個）" };
         }
         for (let i = 0; i < nums.length; i++) {
           if (nums[i] < 200 || nums[i] > 3000) {

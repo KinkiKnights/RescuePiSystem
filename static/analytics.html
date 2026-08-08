@@ -648,16 +648,16 @@
 
       /* 鳴動パターン：12 マス（左 3 マスは選択不可・常に OFF）。
          状態は "0"/"1" の 12 文字で room_analysis[room].pattern に保持。
-         周波数は damiyan の監視 12 周波数（frequencies.json）から選択。 */
+         周波数は damiyan の監視周波数（初期 8 個、frequencies.json）から選択。 */
       const PATTERN_LEN = 12;
       const PATTERN_FIXED = 3;
-      // 既定候補（frequencies.json のテンプレート値）。reporter からルーム別の
-      // 周波数候補（room_frequencies）が入力されたら、そのルームの候補に置き換わる。
-      const FREQ_OPTIONS = [200, 260, 340, 440, 570, 740, 960, 1240, 1610, 2090, 2710, 3000];
+      // 既定候補（frequencies.json の初期 8 周波数）。reporter からルーム別の
+      // 周波数候補（room_frequencies、1〜12 個）が入力されたら、そのルームの候補に置き換わる。
+      const FREQ_OPTIONS = [349, 494, 659, 784, 1047, 1175, 1760, 1976];
       let roomFrequencies = { A: [], B: [], C: [] };
       function freqOptionsFor(room) {
         const fr = roomFrequencies[room];
-        return fr && fr.length === PATTERN_LEN ? fr : FREQ_OPTIONS;
+        return fr && fr.length >= 1 ? fr : FREQ_OPTIONS;
       }
       function normPattern(p) {
         let s = String(p || "").replace(/[^01]/g, "0").slice(0, PATTERN_LEN);
