@@ -651,7 +651,14 @@
          周波数は damiyan の監視 12 周波数（frequencies.json）から選択。 */
       const PATTERN_LEN = 12;
       const PATTERN_FIXED = 3;
+      // 既定候補（frequencies.json のテンプレート値）。reporter からルーム別の
+      // 周波数候補（room_frequencies）が入力されたら、そのルームの候補に置き換わる。
       const FREQ_OPTIONS = [200, 260, 340, 440, 570, 740, 960, 1240, 1610, 2090, 2710, 3000];
+      let roomFrequencies = { A: [], B: [], C: [] };
+      function freqOptionsFor(room) {
+        const fr = roomFrequencies[room];
+        return fr && fr.length === PATTERN_LEN ? fr : FREQ_OPTIONS;
+      }
       function normPattern(p) {
         let s = String(p || "").replace(/[^01]/g, "0").slice(0, PATTERN_LEN);
         while (s.length < PATTERN_LEN) s += "0";
@@ -714,7 +721,7 @@
             ' aria-label="マス' + (i + 1) + '"></button>'
           );
         }).join("");
-        freqBtns.innerHTML = FREQ_OPTIONS.map(function (f) {
+        freqBtns.innerHTML = freqOptionsFor(activeRoom).map(function (f) {
           return (
             '<button type="button" class="opt-btn' +
             (String(s.freq) === String(f) ? " is-selected" : "") +
@@ -908,6 +915,8 @@
           webrtcServer = nextServer;
           applyVideoMode();
         }
+
+        if (st.room_frequencies) roomFrequencies = st.room_frequencies;
 
         if (st.room_analysis) {
           // サーバー状態で丸ごと置換すると、ローカルでスキャン済み（未確定）の QR が

@@ -221,6 +221,52 @@
     }
     .send-bar .btn { width: auto; flex-shrink: 0; padding: 0.55rem 0.9rem; }
 
+    /* ルーム別 周波数候補（12個）入力：damiyan 検出器へ反映される */
+    .freq-set {
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+      padding: 0.5rem 0.6rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.5rem;
+      background: var(--surface);
+    }
+    .freq-set__label {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .freq-set__field {
+      flex: 1;
+      min-width: 8rem;
+      padding: 0.45rem 0.5rem;
+      font-family: inherit;
+      font-size: 0.8rem;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .freq-set__btn {
+      width: auto;
+      flex-shrink: 0;
+      padding: 0.45rem 0.8rem;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #ffffff;
+      background: #d97a1f;
+      border: 1px solid #d97a1f;
+      cursor: pointer;
+    }
+    .freq-set__current {
+      flex-basis: 100%;
+      margin: 0;
+      font-size: 0.7rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
     /* ---- iPad レイアウト（横 1180×820 / 縦 810×1080 を主対象）----
        700px 以上で 3 ルームを横並びグリッドにして画面全体を使う。
        文字・タップ領域も拡大。700px 未満（スマホ）は従来の縦積みのまま。 */
@@ -326,6 +372,9 @@
         };
       }
 
+      /* ルーム別 周波数候補（共有状態 room_frequencies）。入力は 12 個の Hz。 */
+      let roomFrequencies = { A: [], B: [], C: [] };
+
       /* 報告状態（この端末ローカル）: reportState[room][key] = {reported, updated, sig} */
       const reportState = {};
       ROOMS.forEach(function (r) {
@@ -428,22 +477,60 @@
           );
         }).join("");
         const done = roomAllReported(r);
+        const fr = roomFrequencies[r] || [];
+        const freqSection =
+          '<div class="freq-set" data-room="' + r + '">' +
+          '<span class="freq-set__label">周波数候補</span>' +
+          '<input class="freq-set__field" data-room="' + r +
+          '" inputmode="decimal" placeholder="12個（カンマ/空白区切り Hz）" />' +
+          '<button type="button" class="freq-set__btn" data-room="' + r + '">設定</button>' +
+          '<p class="freq-set__current">' +
+          (fr.length
+            ? "現在: " + fr.map(function (f) { return esc(String(f)); }).join(", ") + " Hz"
+            : "現在: 未入力") +
+          "</p></div>";
         return (
           '<section class="room' + (done ? " room--done" : "") + '" data-room-section="' + r + '">' +
           '<div class="room__head"><div class="room__title">' +
           '<span class="room__name">ルーム' + r + '</span>' +
           '<span class="room__sub">' + ROOM_NAMES[r] + '</span></div>' +
           "</div>" +
-          '<div class="room__items">' + rows + "</div></section>"
+          '<div class="room__items">' + rows + "</div>" +
+          freqSection +
+          "</section>"
         );
       }
 
+      /* 再描画で周波数入力欄のフォーカス・入力中テキストが消えないよう退避/復元 */
+      function saveFreqFocus() {
+        const act = document.activeElement;
+        if (!act || !act.classList || !act.classList.contains("freq-set__field")) return null;
+        return {
+          room: act.dataset.room,
+          value: act.value,
+          s: act.selectionStart,
+          e: act.selectionEnd,
+        };
+      }
+      function restoreFreqFocus(saved) {
+        if (!saved) return;
+        const el = roomsRoot.querySelector('.freq-set__field[data-room="' + saved.room + '"]');
+        if (!el) return;
+        el.value = saved.value;
+        el.focus();
+        try { el.setSelectionRange(saved.s, saved.e); } catch (e) {}
+      }
+
       function renderAll() {
+        const saved = saveFreqFocus();
         roomsRoot.innerHTML = ROOMS.map(roomSectionHtml).join("");
+        restoreFreqFocus(saved);
       }
       function renderRoom(r) {
+        const saved = saveFreqFocus();
         const sec = roomsRoot.querySelector('[data-room-section="' + r + '"]');
         if (sec) sec.outerHTML = roomSectionHtml(r);
+        restoreFreqFocus(saved);
       }
 
       function toggleReported(r, k) {
@@ -461,9 +548,47 @@
         }
       }
 
+      /* ---- 周波数候補の入力 → サーバーへ送信（damiyan 検出器へ反映される） ---- */
+      function parseFrequencies(text) {
+        const parts = String(text || "").trim().split(/[\s,、]+/).filter(Boolean);
+        const nums = parts.map(Number);
+        if (nums.length !== 12 || nums.some(isNaN)) {
+          return { error: "12 個の数値（Hz）をカンマか空白区切りで入力してください（現在 " + parts.length + " 個）" };
+        }
+        for (let i = 0; i < nums.length; i++) {
+          if (nums[i] < 200 || nums[i] > 3000) {
+            return { error: nums[i] + " Hz が範囲外です（200〜3000 Hz）" };
+          }
+        }
+        const s = nums.slice().sort(function (a, b) { return a - b; });
+        for (let i = 1; i < s.length; i++) {
+          if (s[i] - s[i - 1] < 40) {
+            return { error: s[i - 1] + " Hz と " + s[i] + " Hz が近すぎます（40 Hz 以上離す）" };
+          }
+        }
+        return { freqs: nums };
+      }
+
+      function sendFrequencies(room) {
+        const field = roomsRoot.querySelector('.freq-set__field[data-room="' + room + '"]');
+        if (!field) return;
+        const parsed = parseFrequencies(field.value);
+        if (parsed.error) {
+          window.alert("周波数入力エラー（ルーム" + room + "）\n" + parsed.error);
+          return;
+        }
+        if (!window.confirm(
+          "ルーム" + room + " の周波数候補を設定し、音声解析（検出器）を再起動します。\n" +
+          "解析が数秒中断します。よろしいですか？\n\n" + parsed.freqs.join(", ") + " Hz"
+        )) return;
+        client.send({ type: "set_room_frequencies", room: room, frequencies: parsed.freqs });
+        field.value = "";
+      }
+
       /* ---- サーバー状態反映：報告済み項目が更新されたら未報告＋更新バッジ ---- */
       function applyState(st) {
         if (st.room_analysis) roomAnalysis = st.room_analysis;
+        if (st.room_frequencies) roomFrequencies = st.room_frequencies;
         ROOMS.forEach(function (r) {
           const a = roomAnalysis[r] || emptyA();
           ITEM_KEYS.forEach(function (k) {
@@ -488,11 +613,24 @@
         onState: applyState,
       });
 
-      /* ---- タップで報告状態をトグル ---- */
+      /* ---- タップで報告状態をトグル／周波数設定ボタン ---- */
       roomsRoot.addEventListener("click", function (e) {
+        const fbtn = e.target.closest(".freq-set__btn");
+        if (fbtn) {
+          sendFrequencies(fbtn.dataset.room);
+          return;
+        }
+        if (e.target.closest(".freq-set")) return; // 入力欄タップは報告トグルにしない
         const row = e.target.closest(".item-row");
         if (!row) return;
         toggleReported(row.dataset.room, row.dataset.key);
+      });
+      roomsRoot.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        const field = e.target.closest && e.target.closest(".freq-set__field");
+        if (!field) return;
+        e.preventDefault();
+        sendFrequencies(field.dataset.room);
       });
 
       /* ---- コントロールへの手動通知 ---- */
