@@ -18,7 +18,7 @@
 #  Pi 上で動くプログラムは RescuePiSystem リポジトリに集約されています:
 #    - master_control/     : Web UI つきプログラム起動管理サーバ (port 80)
 #    - camera_publisher/   : USB カメラ → WebRTC 配信 (relay へ)
-#    - mic_publisher/      : USB マイク → FLAC ロスレス TCP 配信
+#    - mic_publisher/      : USB マイク → 16kHz PCM を集約ハブへ HTTP push
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
 #    - ros2/kk_can_bringup/: MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
 #  外部 OSS は deploy/robot/rescue_pi_system.repos で参照(vcs import):
@@ -58,10 +58,14 @@ export PI_ID="${PI_ID:-$(hostname | tr '[:lower:]' '[:upper:]')}"    # 配信ID(
 #   USBカメラ(MJPEG出力)の例: "v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec"
 #   CSIカメラの場合は         : "libcamerasrc"
 export CAM1_SRC="${CAM1_SRC:-v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec}"
-# マイク配信 (mic_publisher / FLAC ロスレス TCP)
+# マイク配信 (mic_publisher: 16kHz/mono/S16LE を集約ハブへ HTTP push)
 export MIC_ALSA_DEV="${MIC_ALSA_DEV:-hw:1,0}"   # USBマイク (arecord -l で確認)
-export MIC_RATE="${MIC_RATE:-48000}"            # 48000 または 44100 (マイクのネイティブ)
-export MIC_PORT="${MIC_PORT:-5005}"             # 配信TCPポート
+export HUB_HOST="${HUB_HOST:-192.168.10.3}"     # 集約ハブ(kkrtx)のIP
+export MIC_HUB="${MIC_HUB:-http://${HUB_HOST}:8770}"
+# 号機ID(ハブ側のパスになる)。ホスト名末尾の数字から自動生成 (kk05 -> 5)。
+export MIC_UNIT="${MIC_UNIT:-$(hostname | grep -oE '[0-9]+$' | sed 's/^0*//' || true)}"
+export MIC_UNIT="${MIC_UNIT:-$(hostname)}"      # 数字が無いホスト名はそのまま使う
+export MIC_CAPTURE_RATE="${MIC_CAPTURE_RATE:-48000}"  # arecord 取り込みレート(16000 なら numpy 不要)
 export USER_NAME="$(id -un)"
 # USB WiFi ドングルドライバ (RTL8811AU) は既定で無効(詳細は env_setup.sh / docs)。
 export SETUP_WIFI_DONGLE="${SETUP_WIFI_DONGLE:-0}"

@@ -15,7 +15,7 @@
 #  Pi 上で動くプログラムは RescuePiSystem リポジトリに集約されています:
 #    - master_control/     : Web UI つきプログラム起動管理サーバ (port 80)
 #    - camera_publisher/   : USB カメラ → WebRTC 配信 (relay へ)
-#    - mic_publisher/      : USB マイク → FLAC ロスレス TCP 配信
+#    - mic_publisher/      : USB マイク → 16kHz PCM を集約ハブへ HTTP push
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
 #
 #  通常は kk_robot_setup.sh から呼び出されます(環境変数を引き継ぎます)。
@@ -38,10 +38,13 @@ set -euo pipefail
 #   USBカメラ(MJPEG出力)の例: "v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec"
 #   CSIカメラの場合は         : "libcamerasrc"
 : "${CAM1_SRC:=v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec}"
-# マイク配信 (mic_publisher / FLAC ロスレス TCP)
-: "${MIC_ALSA_DEV:=hw:1,0}"   # USBマイク (arecord -l で確認)
-: "${MIC_RATE:=48000}"        # 48000 または 44100 (マイクのネイティブ)
-: "${MIC_PORT:=5005}"         # 配信TCPポート
+# マイク配信 (mic_publisher: 16kHz/mono/S16LE を集約ハブへ HTTP push)
+: "${MIC_ALSA_DEV:=hw:1,0}"                    # USBマイク (arecord -l で確認)
+: "${HUB_HOST:=192.168.10.3}"                  # 集約ハブ(kkrtx)のIP
+: "${MIC_HUB:=http://${HUB_HOST}:8770}"
+: "${MIC_UNIT:=$(hostname | grep -oE '[0-9]+$' | sed 's/^0*//' || true)}"   # kk05 -> 5
+: "${MIC_UNIT:=$(hostname)}"
+: "${MIC_CAPTURE_RATE:=48000}"                 # 16000 なら numpy 不要 (ALSA が変換)
 : "${USER_NAME:=$(id -un)}"
 # CAN (MCP2515 SPI HAT) bring-up。HAT を装着した号機のみ 1(既定は無効)。
 : "${SETUP_CAN:=0}"
@@ -73,6 +76,11 @@ sudo apt-get install -y \
 sudo apt-get install -y gstreamer1.0-libcamera libcamera-tools gstreamer1.0-plugins-ugly 2>/dev/null \
   || log "   (任意パッケージはスキップ)"
 
+log "1-4. mic_publisher の依存 (arecord / numpy)"
+#   GStreamer も FLAC も使わない。arecord で取り込み、numpy の FIR で 16kHz へ
+#   落として集約ハブへ push する (詳細は docs/protocols/mic.md)。
+sudo apt-get install -y alsa-utils python3-numpy
+
 # =============================================================================
 # 2. ROS2 ワークスペース kk_ws の作成とリポジトリのクローン
 #    Pi 側プログラムは RescuePiSystem に集約。joy_node_web は submodule
@@ -92,7 +100,7 @@ cd "${WS}/src"
   || git clone --recursive "${REPO_URL}" "${REPO_DIR}"
 git -C "${REPO_DIR}" submodule update --init --recursive
 vcs import "${WS}/src" < "${REPO_DIR}/deploy/robot/rescue_pi_system.repos"
-chmod +x "${REPO_DIR}/robot/camera_publisher/"*.sh "${REPO_DIR}/robot/mic_publisher/"*.sh
+chmod +x "${REPO_DIR}/robot/camera_publisher/"*.sh
 
 # =============================================================================
 # 3. rosdep 依存解決 と colcon ビルド
@@ -135,7 +143,7 @@ cat > "${REPO_DIR}/robot/master_control/programs.json" <<JSON
 [
   {"id": 1, "name": "camera",       "type": "bash", "cmd": "PI_ID=${PI_ID} SERVER=${RELAY_URL} CAM1=\"${CAM1_SRC}\" ${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh"},
   {"id": 2, "name": "joy_node_web", "type": "ros2", "cmd": "source ${WS}/install/setup.bash && ros2 run joy_node_web joy_node"},
-  {"id": 3, "name": "mic",          "type": "bash", "cmd": "ALSA_DEV=${MIC_ALSA_DEV} RATE=${MIC_RATE} PORT=${MIC_PORT} ${REPO_DIR}/robot/mic_publisher/mic-publish.sh"}
+  {"id": 3, "name": "mic",          "type": "bash", "cmd": "/usr/bin/python3 ${REPO_DIR}/robot/mic_publisher/mic_publisher.py --hub ${MIC_HUB} --unit ${MIC_UNIT} --device ${MIC_ALSA_DEV} --capture-rate ${MIC_CAPTURE_RATE}"}
 ]
 JSON
 
@@ -173,12 +181,13 @@ curl -s -o /dev/null --max-time 5 -w "   [HTTP %{http_code}] master control UI\n
 set +u; source "/opt/ros/${ROS_DISTRO}/setup.bash" 2>/dev/null || true; source "${WS}/install/setup.bash" 2>/dev/null || true; set -u
 ros2 pkg executables joy_node_web 2>/dev/null | grep -q joy_node && echo "   [OK] joy_node_web ビルド済み" || echo "   [NG] joy_node_web 未ビルド"
 ls "${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh" >/dev/null 2>&1 && echo "   [OK] camera publisher 配置済み" || echo "   [NG] camera publisher なし"
-ls "${REPO_DIR}/robot/mic_publisher/mic-publish.sh" >/dev/null 2>&1 && echo "   [OK] mic publisher 配置済み" || echo "   [NG] mic publisher なし"
+ls "${REPO_DIR}/robot/mic_publisher/mic_publisher.py" >/dev/null 2>&1 && echo "   [OK] mic publisher 配置済み" || echo "   [NG] mic publisher なし"
 
 log "=== RescuePiSystem の環境構築が完了しました ==="
 echo "  - master control:  http://<このPiのIP>/        (port 80, 自動起動済み)"
 echo "  - joy_node_web:    http://<このPiのIP>:8700/joy (master control から起動)"
 echo "  - camera:          PI_ID=${PI_ID}  RELAY=${RELAY_URL}"
-echo "  - mic:             FLACロスレス配信 tcp://<このPiのIP>:${MIC_PORT} (dev=${MIC_ALSA_DEV})"
+echo "  - mic:             ${MIC_HUB}/ingest/${MIC_UNIT} へ push (dev=${MIC_ALSA_DEV})"
+echo "                     購読は ${MIC_HUB}/${MIC_UNIT}"
 echo "  - カメラ/joy/micは master control の Web UI から起動します(自動起動はしません)。"
 echo "  - 反映には再ログイン、または 'source ~/.bashrc' を実行してください。"

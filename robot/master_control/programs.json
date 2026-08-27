@@ -17,7 +17,7 @@
     "id": 3,
     "name": "mic",
     "type": "bash",
-    "cmd": "ALSA_DEV=hw:1,0 RATE=48000 PORT=5005 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic-publish.sh",
+    "cmd": "/usr/bin/python3 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0",
     "autostart": false
   }
 ]
