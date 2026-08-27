@@ -1084,10 +1084,18 @@ async def post_units_shutdown_all() -> Any:
 # 検出器（unit3/4/5、web :8771-8773）は起動時に -f の JSON を読む作りで、実行中の
 # 変更 API は無い（web_server.py は GET のみ）。よって「号機別ファイル書き出し＋
 # プロセス再起動」で反映する。起動コマンドは all_start.bash と同一形式:
-#   uv run damiyan-detector -f <file> --stream 127.0.0.1:500N --label unitN
+#   uv run damiyan-detector -f <file> --stream http://127.0.0.1:8770/<号機> --label unitN
 #     --web 877N --web-host 0.0.0.0   （cwd=DAMIYAN_DIR、kk ユーザー）
-DAMIYAN_DIR = "/home/kk/kk_ws/src/damiyan-signal-processing"
-DAMIYAN_LOG_DIR = "/home/kk/kk_ws/logs"
+# 音源は mic_hub（server/mic_hub、単一ポート + パスで号機選択）。旧 mic_relay の
+# 号機別ポート 500N は廃止済み。契約は docs/protocols/damiyan.md を参照。
+# damiyan-detector は本リポジトリ外（別リポジトリ）なので、置き場所は環境変数で
+# 上書きできる。
+DAMIYAN_DIR = os.environ.get("DAMIYAN_DIR") or "/home/kk/kk_ws/src/damiyan-signal-processing"
+DAMIYAN_LOG_DIR = os.environ.get("DAMIYAN_LOG_DIR") or "/home/kk/kk_ws/logs"
+# mic_hub の購読 URL（units.json の server.host / server.mic_hub_port 由来）。
+# 検出器は control_ui と同じホスト(kkrtx)で動くため既定は 127.0.0.1。
+MIC_HUB_PORT = int((UNITS_CONFIG.get("server") or {}).get("mic_hub_port") or 8770)
+MIC_HUB_HOST = os.environ.get("MIC_HUB_HOST") or "127.0.0.1"
 DAMIYAN_FREQ_COUNT_MAX = 12  # cli.py validate_frequencies は 1〜12 個を受理
 DAMIYAN_FREQ_MIN_HZ = 200.0
 DAMIYAN_FREQ_MAX_HZ = 3000.0
@@ -1143,7 +1151,7 @@ def _restart_damiyan_detector_sync(unit: int, freq_file: str) -> tuple[bool, str
     応答復帰を最大 25 秒待つ。VideoControl は root 稼働のため、検出器は従来と
     同じ kk ユーザーで起動する（runuser + login shell で uv の PATH も解決）。
     """
-    stream = 5000 + unit
+    stream = f"http://{MIC_HUB_HOST}:{MIC_HUB_PORT}/{unit}"   # mic_hub のパス選択
     web = 8768 + unit
     label = f"unit{unit}"
     pat = f"damiyan-detector.*--label {label}"
@@ -1161,7 +1169,7 @@ def _restart_damiyan_detector_sync(unit: int, freq_file: str) -> tuple[bool, str
     inner = (
         f"mkdir -p {shlex.quote(DAMIYAN_LOG_DIR)} && cd {shlex.quote(DAMIYAN_DIR)} && "
         f"nohup uv run damiyan-detector -f {shlex.quote(freq_file)} "
-        f"--stream 127.0.0.1:{stream} --label {label} --web {web} --web-host 0.0.0.0 "
+        f"--stream {shlex.quote(stream)} --label {label} --web {web} --web-host 0.0.0.0 "
         f">> {shlex.quote(log)} 2>&1 &"
     )
     if os.geteuid() == 0:
