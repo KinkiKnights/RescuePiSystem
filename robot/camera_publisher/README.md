@@ -4,15 +4,17 @@ Pi 上で USB カメラを H.264 化し、外部 relay(SFU)へ WebRTC 配信す�
 
 ## 出自と対向コンポーネント
 
-- 移設元: `sanjofumihiro/ClaudeShareContents` の `webrtc-camera/publisher/` @ `c6dcc87`
-- 対向(他デバイス側): relay(Go 製 SFU)・web ビューアは引き続き
-  [ClaudeShareContents/webrtc-camera](https://github.com/sanjofumihiro/ClaudeShareContents) にあります。
+- 出自: `sanjofumihiro/ClaudeShareContents` の `webrtc-camera/publisher/`
+  （2026-08 の統合で本リポジトリへ移設。以後こちらが唯一の実体）
+- 対向: relay(Go 製 SFU)と視聴クライアントも**同じリポジトリ内**にあります
+  → [`server/webrtc_relay/`](../../server/webrtc_relay/)
 
 ## プロトコル契約(relay との互換性)
 
 publisher と relay は WebSocket シグナリング(`ws://<relay>:8080/ws`)で接続します。
-**relay 側のシグナリング仕様を変更した場合は、必ずこの publisher も同時に更新してください。**
-逆にこちらを変更する場合も relay の対応を確認すること。
+契約は [docs/protocols/webrtc.md](../../docs/protocols/webrtc.md) が単一の真実で、
+publisher / relay / クライアント JS はすべて本リポジトリにあります。
+**片側だけ変えず、同じコミットで 3 者を揃えてください。**
 
 ## 起動
 

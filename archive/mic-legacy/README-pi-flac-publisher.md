@@ -1,3 +1,8 @@
+> **これは廃止された旧実装のドキュメントです**（2026-08 の統合で FLAC/TCP 方式は
+> 廃止し、16kHz PCM push 方式へ移行しました。現行は
+> [docs/mic-system.md](../../docs/mic-system.md) と `robot/mic_publisher/`）。
+> 以下の記述にある「別リポジトリの receiver」も現在は存在しません。
+
 # mic_publisher
 
 USB マイクの音声を FLAC ロスレス圧縮して TCP 配信する publisher。
