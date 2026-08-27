@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot Master Server</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', monospace;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    h1 { color: #58a6ff; font-size: 1.3em; margin-bottom: 16px; letter-spacing: 0.05em; }
+
+    /* ── CPU bar ── */
+    .cpu-panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .cpu-label { color: #8b949e; font-size: 0.8em; white-space: nowrap; }
+    .cpu-value { color: #58a6ff; font-size: 1.6em; font-weight: bold; min-width: 72px; }
+    .bar-wrap  { flex: 1; height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+    .bar-fill  { height: 100%; width: 0%; border-radius: 4px; transition: width 0.6s, background 0.4s; background: #3fb950; }
+    .bar-fill.warn   { background: #d29922; }
+    .bar-fill.danger { background: #f85149; }
+    .timestamp  { color: #484f58; font-size: 0.72em; white-space: nowrap; }
+    .last-conn  { color: #484f58; font-size: 0.72em; white-space: nowrap; text-align: right; margin-top: 3px; }
+    .last-conn.stale { color: #d29922; }
+
+    /* ── Program grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-left: 3px solid #6e7681;
+      border-radius: 6px;
+      padding: 11px 13px;
+      transition: border-left-color 0.3s;
+    }
+    .card.running { border-left-color: #3fb950; }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 7px;
+    }
+    .card-id   { color: #484f58; font-size: 0.75em; min-width: 18px; }
+    .card-name { font-size: 0.95em; font-weight: bold; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge {
+      font-size: 0.65em;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: #21262d;
+      color: #8b949e;
+    }
+    .badge.ros2 { color: #79c0ff; }
+
+    .card-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 9px;
+      font-size: 0.78em;
+      color: #8b949e;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #6e7681; flex-shrink: 0; }
+    .dot.running { background: #3fb950; }
+    .pid { margin-left: auto; font-size: 0.9em; color: #484f58; }
+
+    .card-actions { display: flex; gap: 6px; }
+
+    /* ── Autostart toggle (per card) ── */
+    .card-auto { margin-top: 9px; font-size: 0.72em; color: #8b949e; }
+    .card-auto label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .card-auto input { accent-color: #3fb950; cursor: pointer; }
+
+    /* ── Buttons ── */
+    button {
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: 1px solid;
+      cursor: pointer;
+      font-size: 0.75em;
+      font-family: inherit;
+      transition: opacity 0.15s;
+      background: transparent;
+    }
+    button:hover:not(:disabled) { opacity: 0.75; }
+    button:disabled { opacity: 0.3; cursor: default; }
+
+    .btn-start   { color: #3fb950; border-color: #3fb950; }
+    .btn-stop    { color: #f85149; border-color: #f85149; }
+    .btn-restart { color: #58a6ff; border-color: #58a6ff; }
+
+    /* ── System section ── */
+    .sys-panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 14px 16px;
+    }
+    .sys-title {
+      color: #484f58;
+      font-size: 0.75em;
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+    .sys-actions { display: flex; gap: 10px; }
+    .btn-reboot   { color: #d29922; border-color: #d29922; padding: 6px 14px; font-size: 0.82em; }
+    .btn-shutdown { color: #f85149; border-color: #f85149; padding: 6px 14px; font-size: 0.82em; }
+
+    /* ── Config button ── */
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .btn-config {
+      color: #8b949e; border-color: #30363d; padding: 5px 12px;
+      font-size: 0.8em; background: #161b22;
+    }
+    .btn-config:hover { color: #c9d1d9; border-color: #8b949e; opacity: 1; }
+
+    /* ── Modal ── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      width: min(860px, 96vw); max-height: 88vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .modal-head {
+      padding: 13px 16px; border-bottom: 1px solid #30363d;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-head h2 { color: #8b949e; font-size: 0.8em; letter-spacing: 0.1em; }
+    .modal-body { overflow-y: auto; padding: 14px 16px; flex: 1; }
+    .modal-foot {
+      padding: 11px 16px; border-top: 1px solid #30363d;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+
+    /* ── Config rows ── */
+    .cfg-header, .cfg-row {
+      display: grid;
+      grid-template-columns: 40px 1fr 80px 2fr 44px 28px;
+      gap: 6px; align-items: center;
+      margin-bottom: 5px;
+    }
+    .cfg-header { color: #484f58; font-size: 0.72em; margin-bottom: 8px; padding: 0 2px; }
+    .cfg-header .cfg-auto-col { text-align: center; }
+    .cfg-row input[type="number"], .cfg-row input[type="text"], .cfg-row select {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+      color: #c9d1d9; font-family: inherit; font-size: 0.8em;
+      padding: 5px 7px; width: 100%;
+    }
+    .cfg-row input:focus, .cfg-row select:focus {
+      outline: none; border-color: #58a6ff;
+    }
+    .cfg-row select option { background: #161b22; }
+    .cfg-auto { display: flex; justify-content: center; align-items: center; }
+    .cfg-auto input { accent-color: #3fb950; cursor: pointer; width: 15px; height: 15px; }
+    .btn-del {
+      color: #f85149; border-color: transparent; padding: 4px 6px;
+      font-size: 0.85em; background: transparent; line-height: 1;
+    }
+    .btn-del:hover { border-color: #f85149; opacity: 1; }
+    .btn-add {
+      color: #3fb950; border-color: #3fb950;
+      font-size: 0.78em; padding: 5px 12px; background: transparent;
+    }
+    .btn-save     { color: #58a6ff; border-color: #58a6ff; padding: 6px 18px; font-size: 0.82em; background: transparent; }
+    .btn-cancel   { color: #8b949e; border-color: #30363d;  padding: 6px 14px; font-size: 0.82em; background: transparent; }
+    .btn-export   { color: #8b949e; border-color: #30363d;  padding: 5px 11px; font-size: 0.78em; background: transparent; }
+    .btn-export:hover { color: #c9d1d9; border-color: #8b949e; opacity: 1; }
+    .btn-import   { color: #8b949e; border-color: #30363d;  padding: 5px 11px; font-size: 0.78em; background: transparent; cursor: pointer; }
+    .btn-import:hover { color: #c9d1d9; border-color: #8b949e; opacity: 1; }
+    .cfg-msg { font-size: 0.78em; color: #8b949e; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 5px;
+      padding: 8px 14px;
+      font-size: 0.82em;
+      color: #c9d1d9;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+      max-width: 280px;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>&#9881; Robot Master Server</h1>
+    <button class="btn-config" onclick="openConfig()">&#9965; Config</button>
+  </div>
+
+  <div class="cpu-panel">
+    <div>
+      <div class="cpu-label">CPU USAGE</div>
+      <div class="cpu-value" id="cpu-val">--</div>
+    </div>
+    <div class="bar-wrap">
+      <div class="bar-fill" id="bar-fill"></div>
+    </div>
+    <div>
+      <div class="timestamp" id="ts">--</div>
+      <div class="last-conn" id="last-conn">接続中...</div>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="sys-panel">
+    <div class="sys-title">SYSTEM CONTROL</div>
+    <div class="sys-actions">
+      <button class="btn-reboot"   onclick="sysAction('reboot')">&#8635; Reboot</button>
+      <button class="btn-shutdown" onclick="sysAction('shutdown')">&#9211; Shutdown</button>
+    </div>
+  </div>
+
+  <!-- Config modal -->
+  <div class="overlay" id="overlay" onclick="overlayClick(event)">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>PROGRAM CONFIGURATION</h2>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn-export" onclick="exportConfig()">&#8595; Export</button>
+          <label class="btn-import">&#8593; Import<input type="file" id="import-file" accept=".json" style="display:none" onchange="importConfig(event)"></label>
+          <button class="btn-cancel" onclick="closeConfig()">&#10005;</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="cfg-header">
+          <span>ID</span><span>Name</span><span>Type</span><span>Command</span><span class="cfg-auto-col">Auto</span><span></span>
+        </div>
+        <div id="cfg-rows"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-add" onclick="addRow()">+ Add</button>
+        <span class="cfg-msg" id="cfg-msg"></span>
+        <div style="display:flex;gap:8px">
+          <button class="btn-cancel" onclick="closeConfig()">Cancel</button>
+          <button class="btn-save"   onclick="saveConfig()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let toastTimer;
+    let lastConnectedAt = null;
+
+    setInterval(() => {
+      const el = document.getElementById('last-conn');
+      if (!lastConnectedAt) return;
+      const sec = Math.floor((Date.now() - lastConnectedAt) / 1000);
+      el.textContent = `最終接続: ${sec}秒前`;
+      el.className = 'last-conn' + (sec >= 10 ? ' stale' : '');
+    }, 1000);
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    async function fetchStatus() {
+      try {
+        const r = await fetch('/status');
+        if (!r.ok) return;
+        lastConnectedAt = Date.now();
+        render(await r.json());
+      } catch (_) {}
+    }
+
+    function render(data) {
+      // CPU
+      const pct = data.cpu_percent ?? 0;
+      document.getElementById('cpu-val').textContent = pct.toFixed(1) + '%';
+      const fill = document.getElementById('bar-fill');
+      fill.style.width = Math.min(pct, 100) + '%';
+      fill.className = 'bar-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+      document.getElementById('ts').textContent = (data.timestamp || '').replace('T', ' ');
+
+      // Programs
+      document.getElementById('grid').innerHTML = data.programs.map(p => `
+        <div class="card ${p.status}" id="card-${p.id}">
+          <div class="card-head">
+            <span class="card-id">#${p.id}</span>
+            <span class="card-name">${p.name}</span>
+            <span class="badge ${p.type}">${p.type}</span>
+          </div>
+          <div class="card-status">
+            <span class="dot ${p.status}"></span>
+            <span>${p.status}</span>
+            ${p.pid ? `<span class="pid">PID&nbsp;${p.pid}</span>` : ''}
+          </div>
+          <div class="card-actions">
+            <button class="btn-start"   onclick="act('start',${p.id})"   ${p.status==='running'?'disabled':''}>&#9654; Start</button>
+            <button class="btn-stop"    onclick="act('stop',${p.id})"    ${p.status==='stopped'?'disabled':''}>&#9632; Stop</button>
+            <button class="btn-restart" onclick="act('restart',${p.id})">&#8635; Restart</button>
+          </div>
+          <div class="card-auto">
+            <label><input type="checkbox" ${p.autostart?'checked':''} onchange="setAutostart(${p.id}, this.checked)"> 起動時に自動実行</label>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function act(type, id) {
+      const r = await fetch(`/${type}/${id}`, { method: 'POST' });
+      const d = await r.json();
+      toast(d.message);
+      fetchStatus();
+    }
+
+    async function setAutostart(id, enabled) {
+      try {
+        const r = await fetch(`/autostart/${id}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ enabled }),
+        });
+        const d = await r.json();
+        toast(d.message);
+      } catch (_) {
+        toast('autostart 更新に失敗しました');
+      } finally {
+        fetchStatus();
+      }
+    }
+
+    async function sysAction(type) {
+      const label = type === 'reboot' ? '再起動' : 'シャットダウン';
+      if (!confirm(`本当に${label}しますか？`)) return;
+      const r = await fetch(`/system/${type}`, { method: 'POST' });
+      const d = await r.json();
+      toast(d.message);
+    }
+
+    // ── Config modal ─────────────────────────────────────
+    async function openConfig() {
+      const r = await fetch('/programs/config');
+      const configs = await r.json();
+      const container = document.getElementById('cfg-rows');
+      container.innerHTML = '';
+      configs.forEach(c => appendRow(container, c));
+      document.getElementById('cfg-msg').textContent = '';
+      document.getElementById('overlay').classList.add('open');
+    }
+
+    function closeConfig() {
+      document.getElementById('overlay').classList.remove('open');
+    }
+
+    function overlayClick(e) {
+      if (e.target === document.getElementById('overlay')) closeConfig();
+    }
+
+    function appendRow(container, c = {}) {
+      const row = document.createElement('div');
+      row.className = 'cfg-row';
+      row.innerHTML = `
+        <input type="number" min="1" max="99" value="${c.id ?? ''}" placeholder="ID">
+        <input type="text"   value="${escHtml(c.name ?? '')}"  placeholder="name">
+        <select>
+          <option value="ros2" ${c.type==='ros2'?'selected':''}>ros2</option>
+          <option value="bash" ${c.type==='bash'?'selected':''}>bash</option>
+        </select>
+        <input type="text" value="${escHtml(c.cmd ?? '')}" placeholder="command">
+        <span class="cfg-auto"><input type="checkbox" title="起動時に自動実行" ${c.autostart?'checked':''}></span>
+        <button class="btn-del" onclick="this.closest('.cfg-row').remove()">&#10005;</button>
+      `;
+      container.appendChild(row);
+    }
+
+    function addRow() {
+      appendRow(document.getElementById('cfg-rows'));
+    }
+
+    async function saveConfig() {
+      const rows = document.querySelectorAll('.cfg-row');
+      const configs = [];
+      for (const row of rows) {
+        const [idEl, nameEl, typeEl, cmdEl, autoEl] = row.querySelectorAll('input, select');
+        const id = parseInt(idEl.value);
+        if (!id || !nameEl.value.trim() || !cmdEl.value.trim()) {
+          document.getElementById('cfg-msg').textContent = 'ID・Name・Commandは必須です';
+          return;
+        }
+        configs.push({ id, name: nameEl.value.trim(), type: typeEl.value, cmd: cmdEl.value.trim(), autostart: autoEl.checked });
+      }
+      const r = await fetch('/programs/config', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(configs),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        closeConfig();
+        toast('設定を保存しました');
+        fetchStatus();
+      } else {
+        document.getElementById('cfg-msg').textContent = d.message;
+      }
+    }
+
+    function collectRows() {
+      const rows = document.querySelectorAll('.cfg-row');
+      return Array.from(rows).map(row => {
+        const [idEl, nameEl, typeEl, cmdEl, autoEl] = row.querySelectorAll('input, select');
+        return { id: parseInt(idEl.value) || 0, name: nameEl.value.trim(), type: typeEl.value, cmd: cmdEl.value.trim(), autostart: autoEl.checked };
+      });
+    }
+
+    function exportConfig() {
+      const configs = collectRows();
+      const blob = new Blob([JSON.stringify(configs, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'programs.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function importConfig(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const configs = JSON.parse(e.target.result);
+          if (!Array.isArray(configs)) throw new Error('配列形式のJSONが必要です');
+          const container = document.getElementById('cfg-rows');
+          container.innerHTML = '';
+          configs.forEach(c => appendRow(container, c));
+          document.getElementById('cfg-msg').textContent = `${configs.length}件のプログラムを読み込みました`;
+        } catch (err) {
+          document.getElementById('cfg-msg').textContent = 'Import失敗: ' + err.message;
+        }
+        event.target.value = '';
+      };
+      reader.readAsText(file);
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    }
+    // ─────────────────────────────────────────────────────
+
+    fetchStatus();
+    setInterval(fetchStatus, 5000);
+  </script>
+</body>
+</html>

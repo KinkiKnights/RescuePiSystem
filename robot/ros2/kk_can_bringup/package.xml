@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>kk_can_bringup</name>
+  <version>0.1.0</version>
+  <description>Bringup for MCP2515 SocketCAN and ros2_socketcan (KinkiKnights Rescue 2026)</description>
+  <maintainer email="kinkiknights@gmail.com">kk</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>ros2_socketcan</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
