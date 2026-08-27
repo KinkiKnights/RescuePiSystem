@@ -808,6 +808,20 @@ connections: dict[str, set[WebSocket]] = {
 VOICE_DIR = BASE_DIR.parent / "voice_comm"   # server/voice_comm（隣のディレクトリ）
 
 app = FastAPI(title="Rescue Robot Dummy Apps")
+
+
+# WebRTC クライアントライブラリは relay と同じ実体を配信する（複製を持たない）。
+# 実体は server/webrtc_relay/web/webrtc-camera.js（relay の web/ と同一ファイル）。
+# /static のマウントより先に登録することで、このパスだけ実体へ振り向ける。
+WEBRTC_CLIENT_JS = REPO_ROOT / "server" / "webrtc_relay" / "web" / "webrtc-camera.js"
+
+
+@app.get("/static/webrtc-camera.js")
+async def webrtc_client_js() -> FileResponse:
+    """relay 側にある WebRTC クライアント JS をそのまま返す。"""
+    return FileResponse(WEBRTC_CLIENT_JS, media_type="application/javascript")
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/voice", StaticFiles(directory=str(VOICE_DIR)), name="voice")
 
