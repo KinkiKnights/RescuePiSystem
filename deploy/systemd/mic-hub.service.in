@@ -1,0 +1,37 @@
+# =============================================================================
+#  kkrtx 側: 号機マイクの集約ハブ（単一ポート・パスで号機選択）
+# -----------------------------------------------------------------------------
+#  設置:
+#    sudo cp systemd/mic-hub.service /etc/systemd/system/
+#    sudo cp systemd/mic-hub.default /etc/default/mic-hub
+#    sudo systemctl daemon-reload && sudo systemctl enable --now mic-hub
+#
+#  旧 relay(mic_relay.py) が all_start.bash 未登録の手動 nohup 起動で、
+#  kkrtx 再起動のたびに消えていた問題への対処。ここで enable しておけば
+#  再起動しても勝手に戻る。
+# =============================================================================
+[Unit]
+Description=Res26 mic hub (aggregate robot mic audio on one port)
+Documentation=https://github.com/KinkiKnights/MicStreamRes2026
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kk
+Group=kk
+EnvironmentFile=/etc/default/mic-hub
+ExecStart=/usr/bin/python3 /home/kk/kk_ws/src/MicStreamRes2026/hub/mic_hub.py \
+    --port ${MIC_HUB_PORT} \
+    --outdir ${MIC_HUB_OUTDIR} \
+    --segment ${MIC_HUB_SEGMENT} \
+    --retention-hours ${MIC_HUB_RETENTION_HOURS} \
+    --max-gb ${MIC_HUB_MAX_GB}
+
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

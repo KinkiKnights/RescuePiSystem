@@ -1,0 +1,9 @@
+# /etc/default/mic-hub — 集約ハブの設定（このファイルは git 管理外）
+MIC_HUB_PORT=8770
+MIC_HUB_OUTDIR=/home/kk/kk_ws/logs/mic-recordings
+# 1 WAV あたりの秒数
+MIC_HUB_SEGMENT=60
+# これより古い録音を消す（0 で無効）
+MIC_HUB_RETENTION_HOURS=24
+# 号機ごとの録音の総容量上限 GB（0 で無効）。16kHz/mono は 115 MB/時。
+MIC_HUB_MAX_GB=8

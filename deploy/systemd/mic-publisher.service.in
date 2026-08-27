@@ -1,0 +1,42 @@
+# =============================================================================
+#  号機(Pi)側: マイク音声を集約ハブへ push する常駐サービス
+# -----------------------------------------------------------------------------
+#  設置:
+#    sudo cp systemd/mic-publisher.service /etc/systemd/system/
+#    sudo cp systemd/mic-publisher.default /etc/default/mic-publisher
+#    sudo editor /etc/default/mic-publisher     # 号機番号とデバイスを書く
+#    sudo systemctl daemon-reload && sudo systemctl enable --now mic-publisher
+#
+#  設定を /etc/default に置くのは意図的。リポジトリ内の設定ファイルに書くと
+#  git pull で号機ごとの差分が巻き戻る（programs.json で実際に起きている）。
+# =============================================================================
+[Unit]
+Description=Res26 mic publisher (push mic audio to the hub)
+Documentation=https://github.com/KinkiKnights/MicStreamRes2026
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kk
+Group=kk
+# ALSA デバイスを開くには audio グループが要る（未所属だと arecord から
+# 録音デバイスが見えない）。
+SupplementaryGroups=audio
+
+EnvironmentFile=/etc/default/mic-publisher
+ExecStart=/usr/bin/python3 /home/kk/kk_ws/src/MicStreamRes2026/publisher/mic_publisher.py \
+    --hub ${MIC_HUB} \
+    --unit ${MIC_UNIT} \
+    --device ${MIC_DEVICE} \
+    --capture-rate ${MIC_CAPTURE_RATE}
+
+# publisher 自身もハブ断で再接続し続けるが、arecord ごと作り直したい種類の
+# 異常（デバイスの抜き差しなど）に備えて systemd 側でも必ず起こし直す。
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

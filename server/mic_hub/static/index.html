@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<!--
+  mic hub の状態表示 + ブラウザ試聴。
+  単一ファイル・外部依存なし（ハブが GET / でそのまま返す）。
+  試聴は /listen/<unit>?format=raw を fetch でストリーム読みして
+  Web Audio に流し込む。<audio> の無限長 WAV より確実で、レイテンシも読める。
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mic hub</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --fg: #14171a; --dim: #6b7280;
+    --card: #ffffff; --line: #e2e5ea;
+    --ok: #16a34a; --off: #9ca3af; --warn: #d97706;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171a; --fg: #e8eaed; --dim: #9aa1ab;
+            --card: #1d2126; --line: #2c323a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+         font: 14px/1.5 ui-sans-serif, -apple-system, "Hiragino Sans",
+               "Noto Sans JP", sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin-bottom: 20px; font-size: 13px; }
+  .sub code { background: var(--card); border: 1px solid var(--line);
+              border-radius: 4px; padding: 1px 5px; }
+  .grid { display: grid; gap: 12px;
+          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line);
+          border-radius: 10px; padding: 14px 16px; }
+  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); }
+  .dot.on { background: var(--ok); }
+  .dot.stale { background: var(--warn); }
+  .unit { font-weight: 600; font-size: 16px; }
+  .state { color: var(--dim); font-size: 12px; margin-left: auto; }
+  .meter { height: 8px; border-radius: 4px; background: var(--line);
+           overflow: hidden; margin: 10px 0 6px; }
+  .meter > i { display: block; height: 100%; width: 0%;
+               background: var(--ok); transition: width .1s linear; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px;
+       margin: 10px 0 0; font-size: 12.5px; }
+  dt { color: var(--dim); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button, a.btn { font: inherit; font-size: 13px; padding: 5px 11px;
+                  border-radius: 6px; border: 1px solid var(--line);
+                  background: transparent; color: var(--fg);
+                  cursor: pointer; text-decoration: none; }
+  button:hover, a.btn:hover { border-color: var(--dim); }
+  button[disabled] { opacity: .45; cursor: default; }
+  button.live { border-color: var(--ok); color: var(--ok); }
+  .empty { color: var(--dim); padding: 32px; text-align: center;
+           border: 1px dashed var(--line); border-radius: 10px; }
+  footer { margin-top: 22px; color: var(--dim); font-size: 12px; }
+</style>
+
+<h1>mic hub</h1>
+<div class="sub" id="sub">…</div>
+<div class="grid" id="grid"></div>
+<div class="empty" id="empty" hidden>号機がまだ 1 台も接続していません。</div>
+<footer id="foot"></footer>
+
+<script>
+"use strict";
+
+const RATE = 16000;
+const grid = document.getElementById("grid");
+const cards = new Map();     // unit -> {el, refs}
+const players = new Map();   // unit -> Player
+
+const fmtBytes = n => n > 1e9 ? (n / 1e9).toFixed(2) + " GB"
+                   : n > 1e6 ? (n / 1e6).toFixed(1) + " MB"
+                   : n > 1e3 ? (n / 1e3).toFixed(0) + " kB" : n + " B";
+const fmtDur = s => {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h ? `${h}h${String(m).padStart(2, "0")}m` : m ? `${m}m${s % 60}s` : `${s}s`;
+};
+// -60 dBFS を左端、0 dBFS を右端にしたバー表示。
+const meterPct = db => Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+
+function card(unit) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `
+    <div class="head">
+      <span class="dot"></span><span class="unit"></span>
+      <span class="state"></span>
+    </div>
+    <div class="meter"><i></i></div>
+    <dl>
+      <dt>level</dt><dd class="lv">—</dd>
+      <dt>source</dt><dd class="src">—</dd>
+      <dt>uptime</dt><dd class="up">—</dd>
+      <dt>listeners</dt><dd class="ls">—</dd>
+      <dt>recording</dt><dd class="rec">—</dd>
+    </dl>
+    <div class="row">
+      <button class="play">試聴</button>
+      <a class="btn wav" download>WAV を保存</a>
+      <a class="btn url" target="_blank">/listen</a>
+    </div>`;
+  grid.appendChild(el);
+  const refs = {
+    el,
+    dot: el.querySelector(".dot"), name: el.querySelector(".unit"),
+    state: el.querySelector(".state"), bar: el.querySelector(".meter > i"),
+    lv: el.querySelector(".lv"), src: el.querySelector(".src"),
+    up: el.querySelector(".up"), ls: el.querySelector(".ls"),
+    rec: el.querySelector(".rec"), play: el.querySelector(".play"),
+    wav: el.querySelector(".wav"), url: el.querySelector(".url"),
+  };
+  refs.name.textContent = unit;
+  refs.url.href = `/listen/${unit}`;
+  refs.url.textContent = `/${unit}`;
+  refs.wav.href = `/listen/${unit}`;
+  refs.wav.download = `unit${unit}.wav`;
+  refs.play.onclick = () => toggle(unit, refs.play);
+  return refs;
+}
+
+function render(status) {
+  document.getElementById("sub").innerHTML =
+    `${status.rate} Hz / ${status.channels} ch / ${status.format} ・ `
+    + `購読は <code>GET /&lt;号機&gt;</code>、送信は <code>POST /ingest/&lt;号機&gt;</code>`;
+  document.getElementById("foot").textContent =
+    `hub uptime ${fmtDur(status.uptime_sec)}`
+    + (status.recording ? ` ・ 録音先 ${status.outdir}` : " ・ 録音なし");
+  document.getElementById("empty").hidden = status.units.length > 0;
+
+  for (const u of status.units) {
+    let r = cards.get(u.unit);
+    if (!r) { r = card(u.unit); cards.set(u.unit, r); }
+    const stale = u.online && u.last_data_age_sec > 1.0;
+    r.dot.className = "dot" + (u.online ? (stale ? " stale" : " on") : "");
+    r.state.textContent = u.online ? (stale ? `stalled ${u.last_data_age_sec}s` : "online")
+                                   : "offline";
+    r.bar.style.width = (u.online ? meterPct(u.level_dbfs) : 0) + "%";
+    r.lv.textContent = u.online ? `${u.level_dbfs.toFixed(1)} dBFS` : "—";
+    r.src.textContent = u.source || u.publisher || "—";
+    r.up.textContent = u.online
+      ? `${fmtDur(u.uptime_sec)} / ${fmtBytes(u.session_bytes)}` : "—";
+    r.ls.textContent = `${u.listeners}${u.disconnects ? ` (断 ${u.disconnects} 回)` : ""}`;
+    r.rec.textContent = u.recording || "—";
+    r.play.disabled = !u.online;
+    if (!u.online) stop(u.unit, r.play);
+  }
+}
+
+// ---- 試聴（生 S16LE を Web Audio に流し込む）--------------------------------
+class Player {
+  constructor(unit) {
+    this.unit = unit;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.next = 0;
+    this.abort = new AbortController();
+    this.tail = new Uint8Array(0);
+  }
+  async run() {
+    const res = await fetch(`/listen/${this.unit}?format=raw`,
+                            { signal: this.abort.signal, cache: "no-store" });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const reader = res.body.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      this.push(value);
+    }
+  }
+  push(bytes) {
+    // 直前の端数と繋いで、必ず偶数バイト（= 完全なサンプル）だけ処理する。
+    let buf = bytes;
+    if (this.tail.length) {
+      buf = new Uint8Array(this.tail.length + bytes.length);
+      buf.set(this.tail); buf.set(bytes, this.tail.length);
+    }
+    const usable = buf.length - (buf.length % 2);
+    this.tail = buf.slice(usable);
+    if (!usable) return;
+
+    const pcm = new Int16Array(buf.buffer, buf.byteOffset, usable / 2);
+    const ab = this.ctx.createBuffer(1, pcm.length, RATE);
+    const ch = ab.getChannelData(0);
+    for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = ab;
+    src.connect(this.ctx.destination);
+    // 200ms 先にキューを作る。遅れたら現在時刻へ張り直して追いつく。
+    const t = this.ctx.currentTime;
+    if (this.next < t + 0.05) this.next = t + 0.2;
+    src.start(this.next);
+    this.next += ab.duration;
+  }
+  close() { this.abort.abort(); this.ctx.close().catch(() => {}); }
+}
+
+function toggle(unit, btn) {
+  if (players.has(unit)) { stop(unit, btn); return; }
+  const p = new Player(unit);
+  players.set(unit, p);
+  btn.classList.add("live");
+  btn.textContent = "停止";
+  p.run().catch(e => {
+    if (e.name !== "AbortError") console.warn(`listen ${unit}:`, e);
+    stop(unit, btn);
+  });
+}
+
+function stop(unit, btn) {
+  const p = players.get(unit);
+  if (!p) return;
+  players.delete(unit);
+  p.close();
+  btn.classList.remove("live");
+  btn.textContent = "試聴";
+}
+
+// ---- ステータスのポーリング --------------------------------------------------
+async function poll() {
+  try {
+    const r = await fetch("/api/status", { cache: "no-store" });
+    render(await r.json());
+  } catch (e) {
+    document.getElementById("foot").textContent = "hub に接続できません";
+  }
+}
+poll();
+setInterval(poll, 500);
+</script>
