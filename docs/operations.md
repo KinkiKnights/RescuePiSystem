@@ -6,11 +6,11 @@ kkrtx = x86 Ubuntu、ハブ兼アプリホスト、`192.168.10.3`）。
 ## 1. ハブ（kkrtx）
 
 ```bash
-cd ~/kk_ws/src && git clone git@github.com:KinkiKnights/MicStreamRes2026.git
-cd MicStreamRes2026
+cd ~/kk_ws/src && git clone git@github.com:KinkiKnights/RescuePiSystem.git
+cd RescuePiSystem
 
 # 手で動かして確認
-python3 hub/mic_hub.py --port 8770 --outdir ~/kk_ws/logs/mic-recordings
+python3 server/mic_hub/mic_hub.py --port 8770 --outdir ~/kk_ws/logs/mic-recordings
 
 # 常駐化
 sudo cp systemd/mic-hub.service /etc/systemd/system/
@@ -37,11 +37,11 @@ arecord -l
 # kk が audio グループに入っていないと録音デバイスが見えない
 sudo usermod -aG audio kk        # 反映には再ログイン
 
-cd ~/kk_ws/src && git clone git@github.com:KinkiKnights/MicStreamRes2026.git
+cd ~/kk_ws/src && git clone git@github.com:KinkiKnights/RescuePiSystem.git
 sudo apt install -y alsa-utils python3-numpy
 
 # 手で動かして確認
-python3 ~/kk_ws/src/MicStreamRes2026/publisher/mic_publisher.py \
+python3 ~/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py \
     --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0
 ```
 
@@ -65,7 +65,7 @@ journalctl -u mic-publisher -f
 
 ```json
 {"id": 3, "name": "mic", "type": "bash", "autostart": true,
- "cmd": "python3 /home/kk/kk_ws/src/MicStreamRes2026/publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0"}
+ "cmd": "python3 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0"}
 ```
 
 `programs.json` は tracked なので `git pull` で巻き戻るリスクがある。
@@ -106,7 +106,7 @@ curl -s http://192.168.10.3:8770/healthz
 curl -s http://192.168.10.3:8770/api/status | python3 -m json.tool
 
 # マイクなしで系全体を検証（ハブ + 模擬号機 3 台を立てて自動判定）
-python3 tools/selftest.py
+python3 tools/mic_selftest.py
 ```
 
 ## トラブルシュート

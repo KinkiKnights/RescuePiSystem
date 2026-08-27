@@ -25,7 +25,7 @@
 | `master_overlay` | `{visible, title, lines}` | アナリティクス画面への撮影指示オーバーレイ |
 | `analysis_request` | `{pending, unit, timestamp}` | エンジニア→アナリティクスの解析要請 |
 | `control_request` | `{pending, unit, timestamp}` | エンジニア→コントロールの割り込み要請 |
-| `unit_ips` | `{"1".."5": str}` | 号機ごとの固定 IP（`config.json` 由来・読み取り専用）。control が joy 接続に使用。「6. 号機 IP」節参照 |
+| `unit_ips` | `{"1".."5": str}` | 号機ごとの固定 IP（`config/units.json` 由来・読み取り専用）。control が joy 接続に使用。「6. 号機 IP」節参照 |
 | `dark_room_coord` | `{x, y}` または `null` | 暗室座標（エンジニアがマップ上をクリックして指定・全モード共有）。`null` = 未設定。`x`,`y` はマップ表面に対する **0〜1 正規化座標**（画面サイズ・モード非依存）。単一座標のみ保持し、新規指定で上書き。表示は 1800mm 換算（後述）。「7. 暗室座標」節参照 |
 | `field_side` | `"red"` / `"blue"` / `null` | フィールド陣営（マスターが選択・全モード共有）。`null` = 未選択。マップ上の「入口」描画位置を決める（赤＝右辺下半分／青＝左辺下半分）。「7. 暗室座標」節参照 |
 | `dark_room_offset` | `{"red":{x,y}, "blue":{x,y}}` | 暗室座標オフセット（原点校正・マスターが field_side ごとに設定・全モード共有）。正規化暗室座標→map[m] 変換時に加算する。符号規約は **下向き +・右向き −**（単位 map[m] 想定・要確認）。`x`=下方向オフセット（下+）、`y`=右方向オフセット（右−）。既定は全 0。「9. 5号機 自動走行」節参照 |
@@ -37,7 +37,7 @@
 |---|---|---|
 | `unit` | int | 号機番号 |
 | `delay_ms` | int | 通信遅延（ダミー値） |
-| `connected` | bool | 接続状態。サーバーが号機 IP（`config.json`）を数秒周期で実 ping し実測で更新する（`_units_ping_loop`）。`_default_units` の初期値（2号機のみ false）は起動直後のみで、以後は実 ping が権威。**手動 `disabled` 中の号機は ping で上書きしない**（`disable_unit` が設定した値を保持） |
+| `connected` | bool | 接続状態。サーバーが号機 IP（`config/units.json`）を数秒周期で実 ping し実測で更新する（`_units_ping_loop`）。`_default_units` の初期値（2号機のみ false）は起動直後のみで、以後は実 ping が権威。**手動 `disabled` 中の号機は ping で上書きしない**（`disable_unit` が設定した値を保持） |
 | `method` | `"WiFi"`/`"TPIP"` | 通信方式 |
 | `disabled` | bool | 行動不能フラグ |
 | `other_op` | bool | 別オペレーターが操縦中（ダミー） |
@@ -67,7 +67,7 @@
 ### 接続
 
 ```
-ws://<host>:8765/ws/<role>
+ws://<host>/ws/<role>
 ```
 
 `role` は `control` / `analytics` / `engineer` / `reporter` / `master`（未知の値は `all` 扱い）。
@@ -141,7 +141,7 @@ ws://<host>:8765/ws/<role>
 
 各操作後、サーバーは更新後スナップショットを全 WebSocket クライアントへ配信します。
 
-> **注:** 号機 IP は `config.json` 固定・変更不可のため、以前存在した `set_unit_ips` は
+> **注:** 号機 IP は `config/units.json` 固定・変更不可のため、以前存在した `set_unit_ips` は
 > 無効化されています。クライアントが送っても無視され（サーバーログに警告）、state は変化しません。
 
 ---
@@ -149,7 +149,7 @@ ws://<host>:8765/ws/<role>
 ## 4. 音声（別系統・ポート 8766）
 
 操作画面サーバーとは独立した `voice_comm/server.py` が中継します。
-プロトコルの詳細は [`../voice_comm/README.md`](../voice_comm/README.md) を参照。
+プロトコルの詳細は [`../voice_comm/README.md`](../../server/voice_comm/README.md) を参照。
 
 ---
 
@@ -159,9 +159,9 @@ ws://<host>:8765/ws/<role>
 （`video/<号機>.mp4`）を再生する「ダミー映像」機能は廃止されました。
 
 - 号機 `n` → カメラ ID **`RES<n>`**（RES1〜RES5）。
-  - 中継サーバー（SFU）は**別プロジェクト** `ClaudeShareContents/webrtc-camera`（Go・既定ポート 8080）。
+  - 中継サーバー（SFU）は同じリポジトリの [`server/webrtc_relay/`](../../server/webrtc_relay/)（Go・既定ポート 8080）。
     このアプリには含まれないため別途起動が必要。
-  - 視聴クライアントは `static/webrtc-camera.js`（`new WebRTCCamera({server}).connect(videoEl, "RES1")`）。
+  - 視聴クライアントは `/static/webrtc-camera.js`（実体は `server/webrtc_relay/web/webrtc-camera.js`）（`new WebRTCCamera({server}).connect(videoEl, "RES1")`）。
   - 中継先は `webrtc_server`（空なら `ws://<画面を開いたホスト>:8080/ws` を自動推定）。
   - ストリーム未接続時は「映像 No Connect」プレースホルダーを表示。
   - 号機以外の映像枠（overview 等）は WebRTC 対象外のため常に「No Connect」表示。
@@ -170,13 +170,13 @@ ws://<host>:8765/ws/<role>
 
 ## 6. 号機 IP（joy_node_web 接続先・固定設定）
 
-号機ごとの IP はリポジトリ直下の **`config.json`** に固定設定されています（Git 管理対象）。
+号機ごとの IP はリポジトリ直下の **`config/units.json`** に固定設定されています（Git 管理対象）。
 `main.py` が起動時に読み込み `state.unit_ips` に反映し、state スナップショットで配信します。
 コントロール画面はこれを使って joy WebSocket（`ws://<号機IP>:8700/joys`）へ自動接続します。
 
 - **クライアント（マスター等）からは変更不可。** マスター画面は読み取り専用表示のみ。
   `set_unit_ips` は無効化済み（送っても無視）。`reset` でも IP は初期化されません（固定設定のため）。
-- `config.json` が無い/壊れている場合はサーバーログに警告を出し、空 IP で起動を継続します。
+- `config/units.json` が無い/壊れている場合はサーバーログに警告を出し、空 IP で起動を継続します。
 
 | 号機 | IP |
 |---|---|
@@ -282,7 +282,7 @@ ws://<host>:8765/ws/<role>
 
 サーバー（`main.py`）が **5号機の joy_node_web**（`ws://<unit_ips["5"]>:8700/joys`。既存の joy
 接続と同一エンドポイント）へ JSON コマンドを 1 回送る（エッジトリガ）。仕様は
-`kk_rescue26_pi:ros2/joy_node_web/docs/COMMUNICATION_SPEC.md`「2.2 コマンド」に準拠。
+`RescuePiSystem:ros2/joy_node_web/docs/COMMUNICATION_SPEC.md`「2.2 コマンド」に準拠。
 
 ```jsonc
 // 走行開始（armed→lit）

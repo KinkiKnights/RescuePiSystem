@@ -15,7 +15,7 @@
 #  周波数の判定は Goertzel 法を手書きしているので numpy も要らない。
 #  依存は Python 標準ライブラリだけ。
 #
-#  使い方:  python3 tools/selftest.py          （成功なら rc=0）
+#  使い方:  python3 tools/mic_selftest.py          （成功なら rc=0）
 # =============================================================================
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-HUB = os.path.join(ROOT, "hub", "mic_hub.py")
-PUB = os.path.join(ROOT, "publisher", "mic_publisher.py")
+HUB = os.path.join(ROOT, "server", "mic_hub", "mic_hub.py")
+PUB = os.path.join(ROOT, "robot", "mic_publisher", "mic_publisher.py")
 PORT = int(os.environ.get("SELFTEST_PORT", "8779"))
 BASE = f"http://127.0.0.1:{PORT}"
 UNITS = {"3": 660.0, "4": 880.0, "5": 1100.0}

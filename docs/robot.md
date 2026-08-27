@@ -1,7 +1,8 @@
-# kk_rescue26_pi
+# 号機 (Raspberry Pi) のセットアップと構成
 
 KinkiKnights レスキューロボットの Raspberry Pi 上で動作するプログラム一式。
-(旧リポジトリ名: piMasterControl)
+リポジトリ全体の地図は [../README.md](../README.md)、kkrtx 側は
+[operations.md](operations.md) を参照。
 
 - **対象ハード**: Raspberry Pi 5 (aarch64) / **OS**: Ubuntu 24.04 LTS / **ROS**: ROS 2 Jazzy
 - 複数台の Pi へ同一手順で展開可能(`PI_ID` はホスト名から自動生成: kk05 → KK05)
@@ -14,14 +15,14 @@ KinkiKnights レスキューロボットの Raspberry Pi 上で動作するプ�
 (依存導入・ビルド・自動起動設定まで全自動)。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KinkiKnights/kk_rescue26_pi/main/setup/kk_robot_setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/kk_robot_setup.sh | bash
 ```
 
 中継サーバ(relay)IP やカメラソースを変える場合は、`bash` 側に環境変数を付けます
 (clone 後の再実行まで引き継がれます):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KinkiKnights/kk_rescue26_pi/main/setup/kk_robot_setup.sh | RELAY_HOST=192.168.137.1 bash
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/kk_robot_setup.sh | RELAY_HOST=192.168.137.1 bash
 # CSI カメラの例: ... | CAM1_SRC=libcamerasrc bash
 ```
 
@@ -39,7 +40,7 @@ USB WiFi ドングル(RTL8811AU)のドライバ導入は既定で**無効**で�
 古いカーネルの Pi では導入が失敗してしまうためです。ドングルを使う Pi では、先に
 `sudo apt install linux-image-raspi linux-headers-raspi` で最新カーネルへ更新して
 再起動し、ワンライナー先頭に `SETUP_WIFI_DONGLE=1` を付けて実行してください
-(接続設定は [docs/usb-wifi-dongle.md](docs/usb-wifi-dongle.md) 参照)。
+(接続設定は [docs/usb-wifi-dongle.md](usb-wifi-dongle.md) 参照)。
 
 <details><summary>非公開リポジトリの場合 / 手動で clone して実行する場合</summary>
 
@@ -47,18 +48,18 @@ USB WiFi ドングル(RTL8811AU)のドライバ導入は既定で**無効**で�
 自己完結ワンライナーを使います(キー登録 → SSH で clone → 本体実行):
 
 ```bash
-bash -c 'set -e; install -d -m700 ~/.ssh; k=$HOME/.ssh/id_ed25519; [ -f "$k" ] || ssh-keygen -t ed25519 -C "$(hostname)-github" -N "" -f "$k" -q; echo "===== この公開鍵を GitHub に登録してください ====="; echo "  アカウント: https://github.com/settings/keys / リポジトリ単位: Settings -> Deploy keys"; cat "$k.pub"; echo "=================================================="; read -rp "登録が完了したら Enter: " < /dev/tty; export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"; mkdir -p ~/kk_ws/src; [ -d ~/kk_ws/src/kk_rescue26_pi ] || git clone --recursive git@github.com:KinkiKnights/kk_rescue26_pi.git ~/kk_ws/src/kk_rescue26_pi; ~/kk_ws/src/kk_rescue26_pi/setup/kk_robot_setup.sh'
+bash -c 'set -e; install -d -m700 ~/.ssh; k=$HOME/.ssh/id_ed25519; [ -f "$k" ] || ssh-keygen -t ed25519 -C "$(hostname)-github" -N "" -f "$k" -q; echo "===== この公開鍵を GitHub に登録してください ====="; echo "  アカウント: https://github.com/settings/keys / リポジトリ単位: Settings -> Deploy keys"; cat "$k.pub"; echo "=================================================="; read -rp "登録が完了したら Enter: " < /dev/tty; export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"; mkdir -p ~/kk_ws/src; [ -d ~/kk_ws/src/RescuePiSystem ] || git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git ~/kk_ws/src/RescuePiSystem; ~/kk_ws/src/RescuePiSystem/deploy/robot/kk_robot_setup.sh'
 ```
 
 **手動で clone して実行する場合**(SSH キー登録後):
 
 ```bash
 mkdir -p ~/kk_ws/src && cd ~/kk_ws/src
-git clone --recursive git@github.com:KinkiKnights/kk_rescue26_pi.git   # submodule も取得
-./kk_rescue26_pi/setup/kk_robot_setup.sh
+git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git   # submodule も取得
+./RescuePiSystem/deploy/robot/kk_robot_setup.sh
 ```
 
-`--recursive` を付け忘れた場合は `git -C kk_rescue26_pi submodule update --init` で
+`--recursive` を付け忘れた場合は `git -C RescuePiSystem submodule update --init` で
 joy_node_web(submodule)を取得してください(セットアップスクリプトは自動で init します)。
 
 なお `kk_robot_setup.sh` は同じ `setup/` 内の `env_setup.sh` / `app_setup.sh` /
@@ -69,9 +70,9 @@ joy_node_web(submodule)を取得してください(セットアップスクリ�
 各サブスクリプトは単体でも実行できます(環境変数は既定値を使用):
 
 ```bash
-./kk_rescue26_pi/setup/env_setup.sh   # 基本設定 + ROS 導入のみ
-./kk_rescue26_pi/setup/app_setup.sh   # kk_rescue26_pi の環境構築のみ
-./kk_rescue26_pi/setup/update.sh      # 更新して再ビルド
+./RescuePiSystem/deploy/robot/env_setup.sh   # 基本設定 + ROS 導入のみ
+./RescuePiSystem/deploy/robot/app_setup.sh   # RescuePiSystem の環境構築のみ
+./RescuePiSystem/deploy/robot/update.sh      # 更新して再ビルド
 ```
 </details>
 
@@ -81,10 +82,10 @@ joy_node_web(submodule)を取得してください(セットアップスクリ�
 
 Pi 上で動くプログラムを本リポジトリに集約します。joy_node_web は他ロボットでも
 使う共有パッケージのため **submodule**(固定コミットへの参照)として含みます。
-外部 OSS の ros2_socketcan のみ `setup/kk_rescue26_pi.repos` で参照します。
+外部 OSS の ros2_socketcan のみ `deploy/robot/rescue_pi_system.repos` で参照します。
 
 ```
-kk_rescue26_pi/
+RescuePiSystem/
 ├── master_control/      # プログラム起動管理サーバ (port 80, systemd 自動起動)
 │   ├── master_server.py #   Web UI から programs.json のプログラムを起動/停止
 │   └── programs.json    #   このPi固有の登録内容 (セットアップスクリプトが生成)
@@ -96,10 +97,10 @@ kk_rescue26_pi/
 └── setup/
     ├── kk_robot_setup.sh      # オーケストレーター (環境変数定義 / SSH キー登録待ち / 実行メニュー)
     ├── env_setup.sh           # 基本設定 (sudo/swap/WiFi) と ROS 2 の導入
-    ├── app_setup.sh           # kk_rescue26_pi の環境構築 (依存/clone/build/systemd 生成)
+    ├── app_setup.sh           # RescuePiSystem の環境構築 (依存/clone/build/systemd 生成)
     ├── can_setup.sh           # CAN (MCP2515 HAT) のシステム側 bring-up (SETUP_CAN=1 で有効)
-    ├── update.sh              # kk_rescue26_pi を最新に更新して再ビルド
-    └── kk_rescue26_pi.repos   # 外部依存 (ros2_socketcan) の vcstool 定義
+    ├── update.sh              # RescuePiSystem を最新に更新して再ビルド
+    └── RescuePiSystem.repos   # 外部依存 (ros2_socketcan) の vcstool 定義
 
 # .repos で ~/kk_ws/src に別途 clone される (colcon ビルド対象):
 #   ros2_socketcan/   CAN 通信
@@ -115,39 +116,38 @@ kk_rescue26_pi/
   joy_node_web (:8700) ← ブラウザ操作 → /joy → ros2_socketcan → CAN
 ```
 
-## 他リポジトリとの関係(メンテナンス方針)
+## 外部リポジトリとの関係(メンテナンス方針)
 
-**原則: 各コンポーネントの実体はただ1つのリポジトリにのみ置く。**
-コピーを複数リポジトリに持たない。これが乖離防止の基本ルールです。
+**原則: 各コンポーネントの実体はただ1つの場所にのみ置く。** 2026-08 に号機・kkrtx・
+操作画面・relay を本リポジトリへ統合したので、以下だけが外部に残ります。
 
 | コンポーネント | 正式な置き場所 (single source of truth) |
 |---|---|
-| master_control / camera_publisher / mic_publisher | **このリポジトリ** |
-| joy_node_web | [KinkiKnights/joy_node_web](https://github.com/KinkiKnights/joy_node_web)(共有パッケージ。本リポジトリには **submodule** として固定コミットで参照) |
+| master_control / camera_publisher / mic_publisher / mic_hub / control_ui / webrtc_relay | **このリポジトリ** |
+| joy_node_web | [KinkiKnights/joy_node_web](https://github.com/KinkiKnights/joy_node_web)(他ロボットでも使う共有パッケージ。**submodule** として固定コミットで参照) |
 | ros2_socketcan | [autowarefoundation/ros2_socketcan](https://github.com/autowarefoundation/ros2_socketcan)(上流 OSS。取り込まず `.repos` で参照) |
-| webrtc relay(SFU)・web ビューア | [ClaudeShareContents/webrtc-camera](https://github.com/sanjofumihiro/ClaudeShareContents)(`publisher/` は本リポジトリへ移設済み) |
-| mic receiver | [KinkiKnights/MicStreamRes2026](https://github.com/KinkiKnights/MicStreamRes2026)(`publisher/` は本リポジトリへ移設済み) |
+| damiyan-signal-processing | 別リポジトリ(音声解析。契約は [protocols/damiyan.md](protocols/damiyan.md) に明文化) |
 
 ### joy_node_web(submodule)の運用
 
 joy_node_web は他ロボットでも使う共有パッケージのため、単一の真実は
 [KinkiKnights/joy_node_web](https://github.com/KinkiKnights/joy_node_web) に置き、本リポジトリは
-`ros2/joy_node_web` に **submodule(固定コミットへの参照)** として含みます。コードは複製されず、
+`robot/ros2/joy_node_web` に **submodule(固定コミットへの参照)** として含みます。コードは複製されず、
 どの版を積んでいるかは submodule のコミット SHA で明示されます(フリートでの版管理が明確)。
 
 ```bash
 # 取得(clone 時に付け忘れた場合)
-git submodule update --init ros2/joy_node_web
+git submodule update --init robot/ros2/joy_node_web
 
 # 上流 (joy_node_web) の最新を取り込み、親リポジトリのポインタを更新
-git submodule update --remote ros2/joy_node_web
-git add ros2/joy_node_web && git commit -m "Bump joy_node_web submodule"
+git submodule update --remote robot/ros2/joy_node_web
+git add robot/ros2/joy_node_web && git commit -m "Bump joy_node_web submodule"
 
 # joy_node_web 自体を修正する場合は submodule 内で作業してから push し、
 # 親リポジトリでポインタ更新をコミットする
-cd ros2/joy_node_web && git checkout main && git pull
+cd robot/ros2/joy_node_web && git checkout main && git pull
 #   … 編集 … → git commit → git push
-cd ../.. && git add ros2/joy_node_web && git commit -m "Bump joy_node_web submodule"
+cd ../.. && git add robot/ros2/joy_node_web && git commit -m "Bump joy_node_web submodule"
 ```
 
 ### プロトコル契約(乖離防止)
@@ -170,8 +170,8 @@ cd ~/kk_ws && colcon build
 ## 運用メモ
 
 - master control は systemd (`master-control.service`) で自動起動。ユニットファイルは
-  `setup/app_setup.sh` だけが生成します(リポジトリ内に .service ファイルの複製を置かない)。
-- `master_control/programs.json` はセットアップスクリプトが Pi ごとに生成する運用ファイルです。
+  `deploy/robot/app_setup.sh` だけが生成します(リポジトリ内に .service ファイルの複製を置かない)。
+- `robot/master_control/programs.json` はセットアップスクリプトが Pi ごとに生成する運用ファイルです。
   リポジトリには KK05 の実例をコミットしてあります。
 - サービス操作: `sudo systemctl restart master-control.service` / `journalctl -u master-control -f`
 
@@ -182,11 +182,11 @@ cd ~/kk_ws && colcon build
 **この設定は既定で無効**で、**MCP2515 HAT を物理的に装着した号機でのみ**有効化します
 (HAT が無いと `can0` が出ず、`can0-setup.service` が待機後に失敗します)。
 
-- **ROS パッケージ** `ros2/kk_can_bringup`(colcon 対象)が ros2_socketcan の
+- **ROS パッケージ** `robot/ros2/kk_can_bringup`(colcon 対象)が ros2_socketcan の
   `socket_can_bridge.launch.xml`(`enable_can_fd=false`)を include します。
-  `ros2_socketcan` 本体は `setup/kk_rescue26_pi.repos` 経由で取得・ビルドされます
+  `ros2_socketcan` 本体は `deploy/robot/rescue_pi_system.repos` 経由で取得・ビルドされます
   (取り込まず上流参照)。
-- **システム側 bring-up** は `setup/can_setup.sh` が担当:Device Tree overlay の追記、
+- **システム側 bring-up** は `deploy/robot/can_setup.sh` が担当:Device Tree overlay の追記、
   `/etc/default/kk-can` の生成、`/usr/local/sbin/can0-up.sh`(SocketCAN link up)と
   `/usr/local/sbin/kk-can-ros-launch.sh`(ブリッジ起動)の設置、systemd ユニット
   (`can0-setup.service` → `kk-can-ros.service`)の生成・有効化を行います(冪等)。
@@ -197,14 +197,14 @@ cd ~/kk_ws && colcon build
 colcon ビルド後に `can_setup.sh` が実行されます:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KinkiKnights/kk_rescue26_pi/main/setup/kk_robot_setup.sh | SETUP_CAN=1 bash
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/kk_robot_setup.sh | SETUP_CAN=1 bash
 ```
 
 既にセットアップ済みの号機に後から追加する場合は単体実行できます
 (`app_setup.sh` の colcon ビルドが済んでいる前提):
 
 ```bash
-SETUP_CAN=1 ./setup/can_setup.sh
+SETUP_CAN=1 ./deploy/robot/can_setup.sh
 ```
 
 **Device Tree overlay の反映には一度再起動が必要**です。再起動後は
@@ -222,8 +222,8 @@ SETUP_CAN=1 ./setup/can_setup.sh
 
 `ROS_DOMAIN_ID` は号機ごとに固有ではなく、**その号機の他 ROS ノード(joy_node_web 等)と
 同じ値**にする必要があります(異なると CAN トピックを相互に読めません)。既定は 0
-(kk_rescue26_pi の他ノードの既定と一致)。号機で ROS グラフを分離している場合のみ、
-セットアップ時に上書きします(例:`ROS_DOMAIN_ID=5 SETUP_CAN=1 ./setup/can_setup.sh`)。
+(RescuePiSystem の他ノードの既定と一致)。号機で ROS グラフを分離している場合のみ、
+セットアップ時に上書きします(例:`ROS_DOMAIN_ID=5 SETUP_CAN=1 ./deploy/robot/can_setup.sh`)。
 上書き後は `/etc/default/kk-can` に保存され、両サービスがこれを参照します。
 
 ### 動作確認

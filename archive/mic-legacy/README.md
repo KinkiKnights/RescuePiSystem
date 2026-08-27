@@ -8,13 +8,13 @@ GStreamer と FLAC/TCP を使い、号機ごとに別ポートで配信してい
 
 | ファイル | 役割 | 置き換え先 |
 |---|---|---|
-| `mic-publish.sh` | 号機: `alsasrc → flacenc → tcpserversink :5005` | [`publisher/mic_publisher.py`](../publisher/mic_publisher.py) |
-| `mic_relay.py` | kkrtx: 号機ごとに接続して**号機ごとの別ポート**で再配信 + 10 秒 WAV 録音。上流ホストのフェイルオーバー(`auto` = .11N > .13N > .12N > kk0N.local を TCP プローブ)つき | [`hub/mic_hub.py`](../hub/mic_hub.py) |
+| `mic-publish.sh` | 号機: `alsasrc → flacenc → tcpserversink :5005` | [`publisher/mic_publisher.py`](../../robot/mic_publisher/mic_publisher.py) |
+| `mic_relay.py` | kkrtx: 号機ごとに接続して**号機ごとの別ポート**で再配信 + 10 秒 WAV 録音。上流ホストのフェイルオーバー(`auto` = .11N > .13N > .12N > kk0N.local を TCP プローブ)つき | [`hub/mic_hub.py`](../../server/mic_hub/mic_hub.py) |
 | `mic_receiver.py` | 受信サンプル（RMS/ピーク周波数を表示するだけ） | 実運用は damiyan-signal-processing の `--stream` |
-| `README-relay.md` | 旧 relay の説明 | [`docs/protocol.md`](../docs/protocol.md) / [`docs/operations.md`](../docs/operations.md) |
+| `README-relay.md` | 旧 relay の説明 | [`docs/protocol.md`](../../docs/protocols/mic.md) / [`docs/operations.md`](../../docs/operations.md) |
 
 旧構成の問題点と、それを新構成でどう直したかは
-[ルートの README](../README.md#旧構成から何を変えたか) にまとめてある。
+[docs/mic-system.md](../../docs/mic-system.md#旧構成から何を変えたか) にまとめてある。
 
 ## 上流フェイルオーバーについて
 

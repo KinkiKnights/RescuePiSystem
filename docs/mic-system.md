@@ -1,4 +1,4 @@
-# MicStreamRes2026 — 号機マイク音声の集約配信
+# マイク音声の集約配信 (mic_hub + mic_publisher)
 
 号機(Raspberry Pi)のマイク音声を **kkrtx の 1 ポートに集約** し、
 **パスで号機を選んで** 誰でも購読できるようにするシステム。
@@ -21,10 +21,10 @@
 
 ```bash
 # kkrtx（ハブ）
-python3 hub/mic_hub.py --port 8770 --outdir ~/kk_ws/logs/mic-recordings
+python3 server/mic_hub/mic_hub.py --port 8770 --outdir ~/kk_ws/logs/mic-recordings
 
 # 各号機（送信）
-python3 publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0
+python3 robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0
 
 # 購読（号機はパスで選ぶ）
 ffplay http://192.168.10.3:8770/5                      # 試し聴き
@@ -36,7 +36,7 @@ uv run damiyan-detector --stream http://192.168.10.3:8770/5 -f frequencies.json
 録音中ファイル名が出て、その場で試聴できる。
 
 常時稼働させる手順（systemd への登録、master_control からの起動）は
-[`docs/operations.md`](docs/operations.md) を参照。
+[`docs/operations.md`](operations.md) を参照。
 
 ## エンドポイント
 
@@ -52,7 +52,7 @@ uv run damiyan-detector --stream http://192.168.10.3:8770/5 -f frequencies.json
 
 号機 ID は `[A-Za-z0-9_-]{1,32}`。`5` でも `kk05` でもよく、
 ハブ側に事前登録は不要（最初の push で自動的に現れる）。
-ワイヤ契約の詳細は [`docs/protocol.md`](docs/protocol.md)。
+ワイヤ契約の詳細は [`docs/protocol.md`](protocols/mic.md)。
 
 ## 旧構成から何を変えたか
 
@@ -90,18 +90,18 @@ uv run damiyan-detector --stream http://192.168.10.3:8770/5 -f frequencies.json
 
 | パス | 中身 |
 |---|---|
-| [`hub/mic_hub.py`](hub/mic_hub.py) | 集約ハブ。取り込み・再配信・録音・状態 API・UI |
-| [`hub/static/index.html`](hub/static/index.html) | 状態表示とブラウザ試聴（外部依存なし） |
-| [`publisher/mic_publisher.py`](publisher/mic_publisher.py) | 号機側の送信。arecord → 16kHz → push |
-| [`systemd/`](systemd/) | 常駐用の unit と `/etc/default` テンプレート |
-| [`tools/selftest.py`](tools/selftest.py) | 実機なしで系全体を検証するスモークテスト |
-| [`docs/protocol.md`](docs/protocol.md) | ワイヤ契約（他言語で実装し直す場合はここだけ読めばよい） |
-| [`docs/operations.md`](docs/operations.md) | 配備・運用・トラブルシュート |
+| [`server/mic_hub/mic_hub.py`](../server/mic_hub/mic_hub.py) | 集約ハブ。取り込み・再配信・録音・状態 API・UI |
+| [`server/mic_hub/static/index.html`](../server/mic_hub/static/index.html) | 状態表示とブラウザ試聴（外部依存なし） |
+| [`robot/mic_publisher/mic_publisher.py`](../robot/mic_publisher/mic_publisher.py) | 号機側の送信。arecord → 16kHz → push |
+| [`deploy/systemd/`](../deploy/systemd/) | 常駐用の unit と `/etc/default` テンプレート |
+| [`tools/mic_selftest.py`](../tools/mic_selftest.py) | 実機なしで系全体を検証するスモークテスト |
+| [`docs/protocol.md`](protocols/mic.md) | ワイヤ契約（他言語で実装し直す場合はここだけ読めばよい） |
+| [`docs/operations.md`](operations.md) | 配備・運用・トラブルシュート |
 
 ## テスト
 
 ```bash
-python3 tools/selftest.py
+python3 tools/mic_selftest.py
 ```
 
 ハブと 3 台ぶんの模擬号機（別々の周波数）を立てて、パスによる号機選択・

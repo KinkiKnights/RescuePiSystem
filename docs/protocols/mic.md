@@ -15,8 +15,8 @@
 経路上どこでも圧縮しない。ハブは受け取ったバイト列をそのまま配り、
 そのまま WAV に書く（購読者が得る PCM は号機の `arecord` 出力とビット一致する）。
 
-レートを変える場合は `hub/mic_hub.py` の `SAMPLE_RATE` と
-`publisher/mic_publisher.py` の `OUT_RATE` を**両方**変えること。
+レートを変える場合は `server/mic_hub/mic_hub.py` の `SAMPLE_RATE` と
+`robot/mic_publisher/mic_publisher.py` の `OUT_RATE` を**両方**変えること。
 不一致のまま接続すると、ハブが `X-Mic-Rate` を見て `400` で弾く。
 
 ## 号機 ID

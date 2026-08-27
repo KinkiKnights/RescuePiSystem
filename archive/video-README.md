@@ -5,5 +5,5 @@
 
 - `main.py` の `/video` 静的マウントおよび `video_mode="file"` 系の再生ロジックは削除済みです。
 - 各画面のカメラ映像は WebRTC で配信されます（号機 1〜5 → カメラ ID `RES1`〜`RES5`）。
-  詳細は [`../docs/STATE_AND_PROTOCOL.md`](../docs/STATE_AND_PROTOCOL.md) の「映像」節を参照。
+  詳細は [`../docs/STATE_AND_PROTOCOL.md`](../docs/protocols/state.md) の「映像」節を参照。
 - このフォルダは現在アプリからは参照されません（配置場所の記録としてのみ残しています）。

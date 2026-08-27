@@ -1,4 +1,4 @@
-# webrtc-camera — Raspberry Pi カメラの低遅延WebRTC配信
+# カメラ映像の低遅延 WebRTC 配信 (camera_publisher + webrtc_relay)
 
 複数のRaspberry Pi (Ubuntu 24.04, Pi 4/5想定) に接続したカメラ映像を、
 **高性能な中継サーバー(SFU)経由でブラウザへWebRTC配信**するシステム。
@@ -54,11 +54,12 @@ Pi側は全入力ソースを **GStreamerの `input-selector`** に束ね、共�
 ## ディレクトリ構成
 
 ```
-webrtc-camera/
+server/webrtc_relay/
 ├── relay/                 # 中継サーバー (Go + Pion SFU)
 │   └── main.go            #   ID多重化 / ファンアウト / camChange転送 / シグナリング / Web配信
 ├── web/
 │   ├── webrtc-camera.js   # 視聴クライアント・ライブラリ (connect / camChange)
+│                          #   control_ui も /static/webrtc-camera.js でこの実体を配信する
 │   └── index.html         # ライブラリを使うサンプルUI (ID入力・カメラ切替ボタン)
 ├── publisher/             # Piパブリッシャ (GStreamer webrtcbin)
 │   ├── publish.py         #   ID申告 / input-selector複数ソース / camChange
@@ -73,7 +74,7 @@ webrtc-camera/
 └── README.md
 ```
 
-## クライアントライブラリ API (`web/webrtc-camera.js`)
+## クライアントライブラリ API (`server/webrtc_relay/web/webrtc-camera.js`)
 
 ```js
 const cam = new WebRTCCamera({
@@ -97,17 +98,17 @@ cam.disconnect();
 
 **中継PC（SFU）**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-relay.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/server/kkrtx_setup.sh | bash
 # systemdで常駐させる場合:
-curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-relay.sh | bash -s -- --service
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/server/kkrtx_setup.sh | bash -s -- --service
 ```
 - Goが無ければ公式版を自動導入（amd64/arm64対応）。
 
 **Raspberry Pi（パブリッシャ）**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-pi.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/app_setup.sh | bash
 # 中継PCを指定し systemd常駐 (Pi4=HW):
-curl -fsSL https://raw.githubusercontent.com/sanjofumihiro/ClaudeShareContents/main/webrtc-camera/setup/setup-pi.sh \
+curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/app_setup.sh \
   | PI_ID=PI01 SERVER=ws://<中継PCのIP>:8080/ws MODEL=pi4 bash -s -- --service
 ```
 - GStreamer(webrtcbin/HWエンコード)とPython依存を導入し、`webrtcbin`が使えるか自動検証。

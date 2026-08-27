@@ -1,4 +1,4 @@
-# レスキューロボコン ダミー操作画面
+# 操作画面サーバ (control_ui)
 
 レスキューロボットコンテストの各種オペレーター画面を再現した**動画撮影・デモ用のダミーアプリ**です。
 複数の端末（PC・スマホ）から同時に開き、WebSocket で状態を共有しながら 5 種類の画面を操作できます。
@@ -23,15 +23,21 @@
 
 ## 起動方法
 
-### 1. 操作画面サーバー（必須・ポート 8765）
+### 1. 操作画面サーバー（必須・ポート 80）
+
+kkrtx では `deploy/server/kkrtx_setup.sh` が systemd 常駐まで設定します
+（`control-ui.service`）。手元で動かす場合:
 
 ```
-pip install -r requirements.txt
-python main.py
+pip install -r server/control_ui/requirements.txt
+python3 server/control_ui/main.py
 ```
 
-`http://localhost:8765/` を開く。`main.py` は `host="0.0.0.0"` なので、同一 LAN の他端末からは
-`http://<このPCのIPアドレス>:8765/` でアクセスできます（Windows ファイアウォールの受信許可が必要）。
+`http://localhost/` を開く。`main.py` は `host="0.0.0.0"` なので、同一 LAN の他端末からは
+`http://<このPCのIPアドレス>/` でアクセスできます（Windows ファイアウォールの受信許可が必要）。
+ポートは `config/units.json` の `server.control_ui_port`（既定 80）で、`CONTROL_UI_PORT`
+環境変数でも上書きできます。**80 番は特権ポート**なので、非 root で動かすときは
+`CONTROL_UI_PORT=8765` のように変えるか、systemd ユニット（`CAP_NET_BIND_SERVICE` 付き）を使います。
 
 ### 2. 音声中継サーバー（任意・ポート 8766）
 
@@ -43,7 +49,7 @@ pip install -r requirements.txt
 python server.py
 ```
 
-詳細は [`voice_comm/README.md`](voice_comm/README.md)。マイクはブラウザの制約で
+詳細は [`voice_comm/README.md`](../server/voice_comm/README.md)。マイクはブラウザの制約で
 **localhost か HTTPS でのみ**利用可能（LAN の他端末で使う場合の回避策は同 README 参照）。
 
 #### iPhone など LAN の他端末で送話を使う（HTTPS）
@@ -58,31 +64,31 @@ python main.py                 # 証明書があれば自動的に HTTPS で起�
 python voice_comm/server.py    # 音声サーバーも同じ certs/ を使い WSS になる
 ```
 
-iPhone で `https://<このPCのIP>:8765/reporter` を開き、証明書の警告を許可（または
+iPhone で `https://<このPCのIP>/reporter` を開き、証明書の警告を許可（または
 `certs/cert.pem` を構成プロファイルとして信頼）すると送話できます。
 証明書は `make_cert.py` で各自生成（`certs/` は Git 管理外）。
 
 ### 3. 実機カメラ映像（WebRTC・唯一の映像ソース）
 
-映像ソースは WebRTC（機体上カメラの中継）のみです。別プロジェクトの WebRTC 中継サーバー
-（`ClaudeShareContents/webrtc-camera`・Go・ポート 8080）を起動すると、各画面に
+映像ソースは WebRTC（機体上カメラの中継）のみです。同じリポジトリの中継サーバー
+（[`server/webrtc_relay/`](../server/webrtc_relay/)・Go・ポート 8080）を起動すると、各画面に
 リアルタイム映像が表示されます。号機 1〜5 がカメラ ID `RES1`〜`RES5` に対応します。
 中継先はマスターモードで指定（空なら画面ホストの 8080 を自動推定）。ストリーム未接続時は
 「映像 No Connect」プレースホルダーが表示されます。詳細は
-[`docs/STATE_AND_PROTOCOL.md`](docs/STATE_AND_PROTOCOL.md) の「映像」節。
+[`docs/protocols/state.md`](protocols/state.md) の「映像」節。
 
-### 4. 号機 IP アドレス（固定設定・変更不可）
+### 4. 号機アドレス（固定設定・変更不可）
 
-号機ごとの IP（コントロールの joy_node_web 接続先 `ws://<号機IP>:8700/joys`）は
-リポジトリ直下の **`config.json`** に固定設定されています。`main.py` が起動時に読み込みます。
-**マスターモードからは編集できません**（読み取り専用表示のみ）。IP を変更する場合は
-`config.json` を編集してサーバーを再起動してください。
+号機ごとのアドレス（コントロールの joy_node_web 接続先 `ws://<号機>:8700/joys`）は
+リポジトリ直下の **[`config/units.json`](../config/units.json)** が唯一の真実です。
+`main.py` が起動時に読み込みます。**マスターモードからは編集できません**（読み取り専用表示のみ）。
+変更したら `config/units.json` を編集してサーバーを再起動してください。
 
-| 号機 | IP | 号機 | IP |
-|---|---|---|---|
-| 1 | `192.168.10.121` | 4 | `192.168.10.113` |
-| 2 | `192.168.10.111` | 5 | `192.168.10.114` |
-| 3 | `192.168.10.112` | | |
+`units[n].addrs` は**優先順の候補配列**で、先頭が最優先です（既定は
+無線 `192.168.10.11N` → 調整無線 `.13N` → 有線 `.12N` → mDNS `kk0N.local`）。
+サーバーは候補を周期的に probe し、live な経路を自動採用します（`resolve.sticky`
+が true の間は現用経路が live なら切り替えません）。ping 監視の対象も
+このファイルから導出されるので、機器表を別に持つ必要はありません。
 
 ---
 
@@ -103,7 +109,7 @@ iPhone で `https://<このPCのIP>:8765/reporter` を開き、証明書の警�
   共有状態 `field_side` として全モードへ配信され、マップ辺に「入口」が描かれます。
   **赤＝右辺の下半分／青＝左辺の下半分**（SVG 原点は左上のため下半分＝画面下側）。未選択時は入口なし。
 - マップは外部アセット・ネットワーク不要の自作 SVG です。詳細は
-  [`docs/STATE_AND_PROTOCOL.md`](docs/STATE_AND_PROTOCOL.md) の「7. 暗室座標」節を参照。
+  [`docs/protocols/state.md`](protocols/state.md) の「7. 暗室座標」節を参照。
 
 ---
 
@@ -150,15 +156,15 @@ situation_reporter.html  ※報告者モードの旧プロトタイプ（現在�
 ```
 [control] [analytics] [engineer] [reporter] [master]
      \        \          |          /         /
-      \        \         |         /         /     ws://host:8765/ws/<role>
+      \        \         |         /         /     ws://host/ws/<role>  
        ----------  main.py (AppState)  ----------
                          |  状態変更 → 全員へ {type:"state", payload: snapshot}
        ----------  voice_comm/server.py  ---------  ws://host:8766/voice
       （PTT 音声中継・操作画面サーバーとは独立）
 ```
 
-状態の中身・WebSocket メッセージ・REST API は [`docs/STATE_AND_PROTOCOL.md`](docs/STATE_AND_PROTOCOL.md) を参照。
-各モードの要求仕様は [`docs/SPEC.md`](docs/SPEC.md) を参照。
+状態の中身・WebSocket メッセージ・REST API は [`docs/protocols/state.md`](protocols/state.md) を参照。
+各モードの要求仕様は [`docs/spec.md`](spec.md) を参照。
 
 ---
 
