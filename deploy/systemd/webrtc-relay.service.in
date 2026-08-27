@@ -1,0 +1,25 @@
+# =============================================================================
+#  kkrtx 側: WebRTC 中継 (SFU) サーバ (port 8080)
+# -----------------------------------------------------------------------------
+#  号機の camera_publisher が push した映像を操作画面へ配る。
+#  バイナリは deploy/server/kkrtx_setup.sh が go build で生成する。
+# =============================================================================
+[Unit]
+Description=RescuePiSystem WebRTC relay (SFU)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+Environment=HOME=@HOME@
+WorkingDirectory=@REPO_DIR@/server/webrtc_relay
+ExecStart=@REPO_DIR@/server/webrtc_relay/webrtc_relay -addr :@RELAY_PORT@ -web @REPO_DIR@/server/webrtc_relay/web
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

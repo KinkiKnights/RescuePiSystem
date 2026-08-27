@@ -1648,7 +1648,7 @@ def _ssl_args() -> dict[str, str]:
     cert = os.environ.get("SSL_CERT") or str(CERT_DIR / "cert.pem")
     key = os.environ.get("SSL_KEY") or str(CERT_DIR / "key.pem")
     if Path(cert).exists() and Path(key).exists():
-        print(f"[HTTPS] {cert} / {key} を使用します（https://<host>:8765/）")
+        print(f"[HTTPS] {cert} / {key} を使用します（https://<host>/）")
         return {"ssl_certfile": cert, "ssl_keyfile": key}
     print("[HTTP] 証明書が無いため HTTP で起動します（iPhoneのマイクは不可）")
     return {}
@@ -1657,4 +1657,12 @@ def _ssl_args() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=80, reload=True, **_ssl_args())
+    # ポートは units.json の server.control_ui_port（既定 80）。開発時は自動再読込
+    # するが、systemd 常駐では CONTROL_UI_RELOAD=0 で切る。
+    _port = int(
+        os.environ.get("CONTROL_UI_PORT")
+        or (UNITS_CONFIG.get("server") or {}).get("control_ui_port")
+        or 80
+    )
+    _reload = os.environ.get("CONTROL_UI_RELOAD", "1") not in ("0", "false", "no")
+    uvicorn.run("main:app", host="0.0.0.0", port=_port, reload=_reload, **_ssl_args())

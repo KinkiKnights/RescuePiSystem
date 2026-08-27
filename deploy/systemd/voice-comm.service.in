@@ -1,0 +1,25 @@
+# =============================================================================
+#  kkrtx 側: プッシュ・トゥ・トーク音声中継サーバ (port 8766)
+# -----------------------------------------------------------------------------
+#  操作画面サーバとは独立プロセス (片方が落ちてももう片方は動く)。
+#  certs/ を control_ui と共有し、あれば WSS になる。
+# =============================================================================
+[Unit]
+Description=RescuePiSystem voice relay (push-to-talk)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+Environment=HOME=@HOME@
+WorkingDirectory=@REPO_DIR@/server/voice_comm
+ExecStart=/usr/bin/python3 @REPO_DIR@/server/voice_comm/server.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

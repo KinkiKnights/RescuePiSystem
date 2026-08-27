@@ -1,31 +1,30 @@
 # =============================================================================
 #  号機(Pi)側: マイク音声を集約ハブへ push する常駐サービス
 # -----------------------------------------------------------------------------
-#  設置:
-#    sudo cp systemd/mic-publisher.service /etc/systemd/system/
-#    sudo cp systemd/mic-publisher.default /etc/default/mic-publisher
-#    sudo editor /etc/default/mic-publisher     # 号機番号とデバイスを書く
-#    sudo systemctl daemon-reload && sudo systemctl enable --now mic-publisher
+#  設置は deploy/robot/app_setup.sh に MIC_SERVICE=1 を付けたときだけ行われる。
+#  既定では master_control の Web UI から起動する運用 (programs.json の "mic")。
+#  **両方を同時に動かさないこと** — ハブは 1 号機に 1 publisher しか受け付けず、
+#  二重起動は 409 で弾かれる (docs/protocols/mic.md)。
 #
 #  設定を /etc/default に置くのは意図的。リポジトリ内の設定ファイルに書くと
 #  git pull で号機ごとの差分が巻き戻る（programs.json で実際に起きている）。
 # =============================================================================
 [Unit]
-Description=Res26 mic publisher (push mic audio to the hub)
-Documentation=https://github.com/KinkiKnights/MicStreamRes2026
+Description=RescuePiSystem mic publisher (push mic audio to the hub)
+Documentation=https://github.com/KinkiKnights/RescuePiSystem
 After=network-online.target sound.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=kk
-Group=kk
+User=@USER@
+Group=@USER@
 # ALSA デバイスを開くには audio グループが要る（未所属だと arecord から
 # 録音デバイスが見えない）。
 SupplementaryGroups=audio
 
 EnvironmentFile=/etc/default/mic-publisher
-ExecStart=/usr/bin/python3 /home/kk/kk_ws/src/MicStreamRes2026/publisher/mic_publisher.py \
+ExecStart=/usr/bin/python3 @REPO_DIR@/robot/mic_publisher/mic_publisher.py \
     --hub ${MIC_HUB} \
     --unit ${MIC_UNIT} \
     --device ${MIC_DEVICE} \

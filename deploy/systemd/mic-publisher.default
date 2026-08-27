@@ -1,4 +1,6 @@
-# /etc/default/mic-publisher — 号機ごとの設定（このファイルは git 管理外）
+# /etc/default/mic-publisher — 号機ごとの設定
+#   雛形は deploy/systemd/mic-publisher.default。/etc/default/mic-publisher は
+#   初回だけ設置され、以後 git pull で上書きされない。
 # 集約ハブの URL（kkrtx の固定アドレス）
 MIC_HUB=http://192.168.10.3:8770
 # 号機 ID。ハブ側のパスになる（5 なら http://kkrtx:8770/5 で聴ける）

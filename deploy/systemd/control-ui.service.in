@@ -1,0 +1,28 @@
+# =============================================================================
+#  kkrtx 側: 操作画面サーバ (FastAPI / port 80 / WebSocket 状態同期)
+# -----------------------------------------------------------------------------
+#  設置は deploy/server/kkrtx_setup.sh が install_unit で行う。
+#  常駐時は uvicorn の reload を切る (CONTROL_UI_RELOAD=0)。
+#  certs/ がある場合は自動的に HTTPS で起動する (make_cert.py で生成)。
+# =============================================================================
+[Unit]
+Description=RescuePiSystem Control UI (operator screens)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Environment=HOME=@HOME@
+Environment=CONTROL_UI_RELOAD=0
+WorkingDirectory=@REPO_DIR@/server/control_ui
+ExecStart=/usr/bin/python3 @REPO_DIR@/server/control_ui/main.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

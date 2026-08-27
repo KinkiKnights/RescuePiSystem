@@ -10,6 +10,7 @@
 #         RescuePiSystem (+ submodule joy_node_web) と .repos の外部依存 (ros2_socketcan)
 #    3. rosdep 依存解決 と colcon ビルド
 #    4. master control の programs.json 生成 と 自動起動 (systemd) 設定
+#         ユニットは deploy/systemd/*.service.in を展開して設置する
 #    5. 簡易セルフチェック
 #
 #  Pi 上で動くプログラムは RescuePiSystem リポジトリに集約されています:
@@ -147,29 +148,39 @@ cat > "${REPO_DIR}/robot/master_control/programs.json" <<JSON
 ]
 JSON
 
-log "4-2. master-control.service を作成(kk ユーザで port 80 を bind)"
-sudo tee /etc/systemd/system/master-control.service >/dev/null <<UNIT
-[Unit]
-Description=RescuePiSystem Master Control
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${USER_NAME}
-Group=${USER_NAME}
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-Environment=HOME=${HOME}
-WorkingDirectory=${REPO_DIR}/robot/master_control
-ExecStart=/usr/bin/python3 ${REPO_DIR}/robot/master_control/master_server.py
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+log "4-2. master-control.service を設置(kk ユーザで port 80 を bind)"
+#   ユニットの内容は deploy/systemd/master-control.service.in が単一の真実。
+#   ここではテンプレートを展開して設置するだけ(内容の重複を持たない)。
+SYSTEMD_DIR="${REPO_DIR}/deploy/systemd"
+source "${SYSTEMD_DIR}/install_unit.sh"
+install_unit master-control
 sudo systemctl daemon-reload
 sudo systemctl enable --now master-control.service
+
+# --- 4-3. mic publisher を常駐させる場合のみ (既定は master_control から起動) ---
+#   ハブは 1 号機 1 publisher しか受け付けないため、常駐と Web UI 起動を
+#   同時に使わないこと(二重起動は 409)。
+if [ "${MIC_SERVICE:-0}" = "1" ]; then
+  log "4-3. mic-publisher.service を設置 (MIC_SERVICE=1)"
+  if [ -f /etc/default/mic-publisher ]; then
+    log "   /etc/default/mic-publisher は既存を尊重します(上書きなし)"
+  else
+    #   雛形は deploy/systemd/mic-publisher.default。ここでは号機の実値で生成する。
+    sudo tee /etc/default/mic-publisher >/dev/null <<DEF
+# /etc/default/mic-publisher — 号機ごとの設定 (app_setup.sh が初回生成)
+MIC_HUB=${MIC_HUB}
+MIC_UNIT=${MIC_UNIT}
+MIC_DEVICE=${MIC_ALSA_DEV}
+MIC_CAPTURE_RATE=${MIC_CAPTURE_RATE}
+DEF
+  fi
+  install_unit mic-publisher
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now mic-publisher.service
+  log "   /etc/default/mic-publisher の MIC_UNIT / MIC_DEVICE を確認してください"
+else
+  log "4-3. mic は master_control の Web UI から起動します (常駐させるなら MIC_SERVICE=1)"
+fi
 
 # =============================================================================
 # 5. 簡易セルフチェック (失敗してもスクリプトは止めない)

@@ -1,4 +1,6 @@
-# /etc/default/mic-hub — 集約ハブの設定（このファイルは git 管理外）
+# /etc/default/mic-hub — 集約ハブの設定
+#   deploy/systemd/mic-hub.default が雛形。/etc/default/mic-hub は初回だけ
+#   設置され、以後 git pull で上書きされない（kkrtx 固有の設定を守る）。
 MIC_HUB_PORT=8770
 MIC_HUB_OUTDIR=/home/kk/kk_ws/logs/mic-recordings
 # 1 WAV あたりの秒数
