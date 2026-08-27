@@ -17,8 +17,8 @@
 #    app_setup.sh の colcon build 後、または新規セットアップ完了後に実行してください。
 #
 #  通常は SETUP_CAN=1 のとき app_setup.sh から呼ばれます。単体でも実行できます:
-#    SETUP_CAN=1 ./setup/can_setup.sh
-#    CAN_BITRATE=250000 ROS_DOMAIN_ID=5 ./setup/can_setup.sh
+#    SETUP_CAN=1 ./deploy/robot/can_setup.sh
+#    CAN_BITRATE=250000 ROS_DOMAIN_ID=5 ./deploy/robot/can_setup.sh
 #
 #  ※ MCP2515 HAT が物理的に装着されていないと can0 は現れず、can0-setup.service は
 #    待機後に失敗します(起動全体は継続)。HAT 装着機でのみ実行してください。
@@ -36,7 +36,7 @@ set -euo pipefail
 : "${CAN_INTERRUPT_GPIO:=24}"        # MCP2515 INT ピン (BCM)
 : "${DT_OVERLAY:=mcp2515-can0}"
 # ROS 2 ドメイン。号機内の他 ROS ノード(joy_node_web 等)と揃える必要があります。
-# 既定 0(kk_rescue26_pi の他ノードの既定と一致)。号機で分離する場合のみ変更。
+# 既定 0(RescuePiSystem の他ノードの既定と一致)。号機で分離する場合のみ変更。
 : "${ROS_DOMAIN_ID:=0}"
 
 log() { printf '\033[1;36m[can-setup]\033[0m %s\n' "$*"; }

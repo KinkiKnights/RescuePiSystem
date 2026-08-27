@@ -51,7 +51,7 @@ def _parse_norm_coord(coord: Any) -> dict[str, float] | None:
 # ===== 5号機 自動走行（暗室座標を目標に joy_node_web へ set_goal / cancel_goal） =====
 # フィールドは 1800×1800mm の正方形。暗室座標は 0..1 正規化（左上=(0,0)・右下=(1,1)、
 # nx=右方向・ny=下方向）。目標コマンドはメートル・map フレームで送る。
-# 座標系は kk_rescue26_pi:ros2/joy_node_web/docs/COMMUNICATION_SPEC.md「4. 座標系」に従う。
+# 座標系は RescuePiSystem:ros2/joy_node_web/docs/COMMUNICATION_SPEC.md「4. 座標系」に従う。
 FIELD_SIZE_M = 1.8  # 1800mm
 
 # ロボットへコマンドを送る WebSocket（既存の joy 接続と同一 = ws://<ip>:8700/joys）

@@ -10,34 +10,34 @@
 #    - GitHub 用 SSH キーの生成・表示(GitHub に登録できるまで待機)
 #    - どの処理を実行するかのユーザー選択(メニュー)
 #
-#  実処理は setup/ 内のサブスクリプトが担当します:
+#  実処理は deploy/robot/ 内のサブスクリプトが担当します:
 #    - env_setup.sh : 基本設定 (sudo/swap/WiFi) と ROS 2 の導入
-#    - app_setup.sh : kk_rescue26_pi の各種環境構築 (依存/clone/build/systemd)
-#    - update.sh    : kk_rescue26_pi を最新に更新して再ビルド
+#    - app_setup.sh : RescuePiSystem の各種環境構築 (依存/clone/build/systemd)
+#    - update.sh    : RescuePiSystem を最新に更新して再ビルド
 #
-#  Pi 上で動くプログラムは kk_rescue26_pi リポジトリに集約されています:
+#  Pi 上で動くプログラムは RescuePiSystem リポジトリに集約されています:
 #    - master_control/     : Web UI つきプログラム起動管理サーバ (port 80)
 #    - camera_publisher/   : USB カメラ → WebRTC 配信 (relay へ)
 #    - mic_publisher/      : USB マイク → FLAC ロスレス TCP 配信
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
 #    - ros2/kk_can_bringup/: MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
-#  外部 OSS は setup/kk_rescue26_pi.repos で参照(vcs import):
+#  外部 OSS は deploy/robot/rescue_pi_system.repos で参照(vcs import):
 #    - ros2_socketcan      : CAN 通信 (上流 OSS)
 #  CAN(MCP2515 HAT)のシステム側 bring-up は setup/can_setup.sh が担当
 #  (HAT 装着機のみ。SETUP_CAN=1 で app_setup.sh から実行、または単体実行)。
 #
 #  ※ webrtc の中継(SFU=relay)サーバとビューアは「別マシン」で動かします
-#    (ClaudeShareContents/webrtc-camera の relay/web を参照)。relay は
+#    (本リポジトリ server/webrtc_relay の relay/web を参照)。relay は
 #    RELAY_HOST:8080。publisher は relay が落ちても自動再接続します。
 #
 #  使い方(公開リポジトリ時に推奨のワンライナー):
-#    curl -fsSL https://raw.githubusercontent.com/KinkiKnights/kk_rescue26_pi/main/setup/kk_robot_setup.sh | bash
+#    curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/kk_robot_setup.sh | bash
 #    本スクリプトは自己完結ブートストラップ:サブスクリプトが手元に無い場合
 #    (raw URL の curl | bash 等)は、SSH キー生成→登録待ち→リポジトリ clone→
 #    clone 先の自分自身を exec で再実行、まで自動で行う。
 #  手動 clone の場合(SSH キー登録後):
-#    git clone --recursive git@github.com:KinkiKnights/kk_rescue26_pi.git
-#    ./kk_rescue26_pi/setup/kk_robot_setup.sh
+#    git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git
+#    ./RescuePiSystem/deploy/robot/kk_robot_setup.sh
 #
 #  ※ 別のラズパイでもそのまま実行できます。PI_ID はホスト名から自動生成します
 #    (例: hostname=kk06 → PI_ID=KK06)。
@@ -47,9 +47,9 @@ set -euo pipefail
 # ---- 各種環境変数の定義(サブスクリプトへ export で引き継ぐ)-----------------
 export ROS_DISTRO="jazzy"
 export WS="$HOME/kk_ws"                                              # ワークスペース
-export REPO_SSH="git@github.com:KinkiKnights/kk_rescue26_pi.git"     # 優先 (SSH キーで認証)
-export REPO_URL="https://github.com/KinkiKnights/kk_rescue26_pi.git" # 公開リポジトリ時のフォールバック
-export REPO_DIR="${WS}/src/kk_rescue26_pi"
+export REPO_SSH="git@github.com:KinkiKnights/RescuePiSystem.git"     # 優先 (SSH キーで認証)
+export REPO_URL="https://github.com/KinkiKnights/RescuePiSystem.git" # 公開リポジトリ時のフォールバック
+export REPO_DIR="${WS}/src/RescuePiSystem"
 export PI_MODEL="pi5"                                     # publish-${PI_MODEL}.sh を使用 (pi4=HW / pi5=SW)
 export RELAY_HOST="${RELAY_HOST:-192.168.137.1}"          # webrtc 中継(SFU)サーバのIP
 export RELAY_URL="ws://${RELAY_HOST}:8080/ws"
@@ -73,7 +73,7 @@ export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 export GIT_USER_NAME="${GIT_USER_NAME:-sanjo}"
 export GIT_USER_EMAIL="${GIT_USER_EMAIL:-sanjo@kinkiknights.com}"
 
-# サブスクリプトの場所(本スクリプトと同じ setup/ ディレクトリ)。
+# サブスクリプトの場所(本スクリプトと同じ deploy/robot/ ディレクトリ)。
 #   curl | bash のようにパイプで実行された場合は BASH_SOURCE が実ファイルを指さない
 #   ため空になり得る(set -u 対策で :- を付ける)。その場合は下のブートストラップで
 #   リポジトリを clone し、clone 先から自分自身を再実行する。
@@ -169,7 +169,7 @@ bootstrap_clone_and_reexec() {
   # 二重ブートストラップ(clone 失敗時の無限ループ)を防ぐガード。
   if [ "${KK_BOOTSTRAPPED:-0}" = "1" ]; then
     log "エラー: clone 後もサブスクリプトが見つかりません(clone 失敗の可能性)。"
-    log "        手動で clone してから setup/kk_robot_setup.sh を実行してください。"
+    log "        手動で clone してから deploy/robot/kk_robot_setup.sh を実行してください。"
     exit 1
   fi
   log "サブスクリプトが手元に無いため、リポジトリを clone してから続行します(ブートストラップ)"
@@ -180,7 +180,7 @@ bootstrap_clone_and_reexec() {
     || git clone --recursive "${REPO_URL}" "${REPO_DIR}"
   log "   -> clone 完了。clone 先の kk_robot_setup.sh を再実行します"
   export KK_BOOTSTRAPPED=1   # 環境変数(定義済みの設定含む)は exec に引き継がれる
-  exec bash "${REPO_DIR}/setup/kk_robot_setup.sh"
+  exec bash "${REPO_DIR}/deploy/robot/kk_robot_setup.sh"
 }
 
 # =============================================================================
@@ -214,7 +214,7 @@ echo "=================================================================="
 echo " 実行する処理を選択してください:"
 echo "   1) 新規セットアップ (env_setup + app_setup) [推奨: 初回]"
 echo "   2) 基本設定 + ROS 導入のみ (env_setup)"
-echo "   3) kk_rescue26_pi 環境構築のみ (app_setup)"
+echo "   3) RescuePiSystem 環境構築のみ (app_setup)"
 echo "   4) 更新して再ビルド (update)"
 echo "   q) 何もせず終了"
 echo "=================================================================="

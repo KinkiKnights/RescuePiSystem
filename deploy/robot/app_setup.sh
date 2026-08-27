@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  app_setup.sh  —  kk_rescue26_pi の各種環境構築
+#  app_setup.sh  —  RescuePiSystem の各種環境構築
 # -----------------------------------------------------------------------------
 #  基本設定と ROS の導入 (env_setup.sh) が済んでいる前提で、本リポジトリの
 #  プログラムを動かすための環境を構築します:
 #    1. 各コンポーネントの依存パッケージ導入
 #         master_control / joy_node_web / camera_publisher
 #    2. ROS 2 ワークスペース kk_ws の作成とリポジトリのクローン
-#         kk_rescue26_pi (+ submodule joy_node_web) と .repos の外部依存 (ros2_socketcan)
+#         RescuePiSystem (+ submodule joy_node_web) と .repos の外部依存 (ros2_socketcan)
 #    3. rosdep 依存解決 と colcon ビルド
 #    4. master control の programs.json 生成 と 自動起動 (systemd) 設定
 #    5. 簡易セルフチェック
 #
-#  Pi 上で動くプログラムは kk_rescue26_pi リポジトリに集約されています:
+#  Pi 上で動くプログラムは RescuePiSystem リポジトリに集約されています:
 #    - master_control/     : Web UI つきプログラム起動管理サーバ (port 80)
 #    - camera_publisher/   : USB カメラ → WebRTC 配信 (relay へ)
 #    - mic_publisher/      : USB マイク → FLAC ロスレス TCP 配信
@@ -20,16 +20,16 @@
 #
 #  通常は kk_robot_setup.sh から呼び出されます(環境変数を引き継ぎます)。
 #  単体でも実行できます(未設定の環境変数は既定値を使用):
-#    ./setup/app_setup.sh
+#    ./deploy/robot/app_setup.sh
 # =============================================================================
 set -euo pipefail
 
 # ---- 環境変数(kk_robot_setup.sh から export。単体実行時は既定値)-----------
 : "${ROS_DISTRO:=jazzy}"
 : "${WS:=$HOME/kk_ws}"
-: "${REPO_SSH:=git@github.com:KinkiKnights/kk_rescue26_pi.git}"       # 優先 (SSH キーで認証)
-: "${REPO_URL:=https://github.com/KinkiKnights/kk_rescue26_pi.git}"   # 公開時のフォールバック
-: "${REPO_DIR:=${WS}/src/kk_rescue26_pi}"
+: "${REPO_SSH:=git@github.com:KinkiKnights/RescuePiSystem.git}"       # 優先 (SSH キーで認証)
+: "${REPO_URL:=https://github.com/KinkiKnights/RescuePiSystem.git}"   # 公開時のフォールバック
+: "${REPO_DIR:=${WS}/src/RescuePiSystem}"
 : "${PI_MODEL:=pi5}"                                       # publish-${PI_MODEL}.sh を使用 (pi4=HW / pi5=SW)
 : "${RELAY_HOST:=192.168.137.1}"                           # webrtc 中継(SFU)サーバのIP
 : "${RELAY_URL:=ws://${RELAY_HOST}:8080/ws}"
@@ -75,9 +75,9 @@ sudo apt-get install -y gstreamer1.0-libcamera libcamera-tools gstreamer1.0-plug
 
 # =============================================================================
 # 2. ROS2 ワークスペース kk_ws の作成とリポジトリのクローン
-#    Pi 側プログラムは kk_rescue26_pi に集約。joy_node_web は submodule
+#    Pi 側プログラムは RescuePiSystem に集約。joy_node_web は submodule
 #    (ros2/joy_node_web) として固定コミットで含む → submodule init が必要。
-#    外部 OSS (ros2_socketcan) のみ setup/kk_rescue26_pi.repos に定義し
+#    外部 OSS (ros2_socketcan) のみ deploy/robot/rescue_pi_system.repos に定義し
 #    vcstool で取得します。
 # =============================================================================
 log "2. ワークスペース ${WS} を作成しリポジトリをクローン"
@@ -91,13 +91,13 @@ cd "${WS}/src"
   || GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git clone --recursive "${REPO_SSH}" "${REPO_DIR}" \
   || git clone --recursive "${REPO_URL}" "${REPO_DIR}"
 git -C "${REPO_DIR}" submodule update --init --recursive
-vcs import "${WS}/src" < "${REPO_DIR}/setup/kk_rescue26_pi.repos"
-chmod +x "${REPO_DIR}/camera_publisher/"*.sh "${REPO_DIR}/mic_publisher/"*.sh
+vcs import "${WS}/src" < "${REPO_DIR}/deploy/robot/rescue_pi_system.repos"
+chmod +x "${REPO_DIR}/robot/camera_publisher/"*.sh "${REPO_DIR}/robot/mic_publisher/"*.sh
 
 # =============================================================================
 # 3. rosdep 依存解決 と colcon ビルド
 #    colcon は package.xml を持つパッケージのみビルド:
-#      kk_rescue26_pi/ros2/joy_node_web / kk_rescue26_pi/ros2/kk_can_bringup
+#      RescuePiSystem/robot/ros2/joy_node_web / RescuePiSystem/robot/ros2/kk_can_bringup
 #      / ros2_socketcan / ros2_socketcan_msgs
 #    (master_control / camera_publisher / mic_publisher は ROS パッケージではない)
 #    rosdep が ros2_socketcan の依存 (ros-jazzy-can-msgs 等) を自動導入します。
@@ -131,18 +131,18 @@ fi
 #    systemd ユニットはこのスクリプトだけが生成します(重複定義を持たない)。
 # =============================================================================
 log "4-1. programs.json にカメラ / joy_node_web / mic を登録"
-cat > "${REPO_DIR}/master_control/programs.json" <<JSON
+cat > "${REPO_DIR}/robot/master_control/programs.json" <<JSON
 [
-  {"id": 1, "name": "camera",       "type": "bash", "cmd": "PI_ID=${PI_ID} SERVER=${RELAY_URL} CAM1=\"${CAM1_SRC}\" ${REPO_DIR}/camera_publisher/publish-${PI_MODEL}.sh"},
+  {"id": 1, "name": "camera",       "type": "bash", "cmd": "PI_ID=${PI_ID} SERVER=${RELAY_URL} CAM1=\"${CAM1_SRC}\" ${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh"},
   {"id": 2, "name": "joy_node_web", "type": "ros2", "cmd": "source ${WS}/install/setup.bash && ros2 run joy_node_web joy_node"},
-  {"id": 3, "name": "mic",          "type": "bash", "cmd": "ALSA_DEV=${MIC_ALSA_DEV} RATE=${MIC_RATE} PORT=${MIC_PORT} ${REPO_DIR}/mic_publisher/mic-publish.sh"}
+  {"id": 3, "name": "mic",          "type": "bash", "cmd": "ALSA_DEV=${MIC_ALSA_DEV} RATE=${MIC_RATE} PORT=${MIC_PORT} ${REPO_DIR}/robot/mic_publisher/mic-publish.sh"}
 ]
 JSON
 
 log "4-2. master-control.service を作成(kk ユーザで port 80 を bind)"
 sudo tee /etc/systemd/system/master-control.service >/dev/null <<UNIT
 [Unit]
-Description=kk_rescue26_pi Master Control
+Description=RescuePiSystem Master Control
 After=network-online.target
 Wants=network-online.target
 
@@ -152,8 +152,8 @@ User=${USER_NAME}
 Group=${USER_NAME}
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=HOME=${HOME}
-WorkingDirectory=${REPO_DIR}/master_control
-ExecStart=/usr/bin/python3 ${REPO_DIR}/master_control/master_server.py
+WorkingDirectory=${REPO_DIR}/robot/master_control
+ExecStart=/usr/bin/python3 ${REPO_DIR}/robot/master_control/master_server.py
 Restart=on-failure
 RestartSec=3
 
@@ -172,10 +172,10 @@ systemctl is-active --quiet master-control.service && echo "   [OK] master-contr
 curl -s -o /dev/null --max-time 5 -w "   [HTTP %{http_code}] master control UI\n" "http://127.0.0.1:80/" || echo "   [NG] UI 応答なし"
 set +u; source "/opt/ros/${ROS_DISTRO}/setup.bash" 2>/dev/null || true; source "${WS}/install/setup.bash" 2>/dev/null || true; set -u
 ros2 pkg executables joy_node_web 2>/dev/null | grep -q joy_node && echo "   [OK] joy_node_web ビルド済み" || echo "   [NG] joy_node_web 未ビルド"
-ls "${REPO_DIR}/camera_publisher/publish-${PI_MODEL}.sh" >/dev/null 2>&1 && echo "   [OK] camera publisher 配置済み" || echo "   [NG] camera publisher なし"
-ls "${REPO_DIR}/mic_publisher/mic-publish.sh" >/dev/null 2>&1 && echo "   [OK] mic publisher 配置済み" || echo "   [NG] mic publisher なし"
+ls "${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh" >/dev/null 2>&1 && echo "   [OK] camera publisher 配置済み" || echo "   [NG] camera publisher なし"
+ls "${REPO_DIR}/robot/mic_publisher/mic-publish.sh" >/dev/null 2>&1 && echo "   [OK] mic publisher 配置済み" || echo "   [NG] mic publisher なし"
 
-log "=== kk_rescue26_pi の環境構築が完了しました ==="
+log "=== RescuePiSystem の環境構築が完了しました ==="
 echo "  - master control:  http://<このPiのIP>/        (port 80, 自動起動済み)"
 echo "  - joy_node_web:    http://<このPiのIP>:8700/joy (master control から起動)"
 echo "  - camera:          PI_ID=${PI_ID}  RELAY=${RELAY_URL}"

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  update.sh  —  kk_rescue26_pi を最新に更新して再ビルド
+#  update.sh  —  RescuePiSystem を最新に更新して再ビルド
 # -----------------------------------------------------------------------------
 #  既にセットアップ済みの Pi で、リポジトリの更新を取り込みます:
-#    1. kk_rescue26_pi の git pull(+ submodule joy_node_web の更新)
+#    1. RescuePiSystem の git pull(+ submodule joy_node_web の更新)
 #    2. 外部依存 (.repos: ros2_socketcan) の vcs pull
 #    3. colcon 再ビルド
 #    4. master-control.service の再起動(稼働中の場合)
@@ -13,14 +13,14 @@
 #
 #  通常は kk_robot_setup.sh から呼び出されます(環境変数を引き継ぎます)。
 #  単体でも実行できます(未設定の環境変数は既定値を使用):
-#    ./setup/update.sh
+#    ./deploy/robot/update.sh
 # =============================================================================
 set -euo pipefail
 
 # ---- 環境変数(kk_robot_setup.sh から export。単体実行時は既定値)-----------
 : "${ROS_DISTRO:=jazzy}"
 : "${WS:=$HOME/kk_ws}"
-: "${REPO_DIR:=${WS}/src/kk_rescue26_pi}"
+: "${REPO_DIR:=${WS}/src/RescuePiSystem}"
 
 log() { printf '\033[1;36m[update]\033[0m %s\n' "$*"; }
 
@@ -30,9 +30,9 @@ if [ ! -d "${REPO_DIR}/.git" ]; then
 fi
 
 # =============================================================================
-# 1. kk_rescue26_pi 本体と submodule (joy_node_web) を更新
+# 1. RescuePiSystem 本体と submodule (joy_node_web) を更新
 # =============================================================================
-log "1. kk_rescue26_pi を pull(現在のブランチを追従)"
+log "1. RescuePiSystem を pull(現在のブランチを追従)"
 BRANCH="$(git -C "${REPO_DIR}" rev-parse --abbrev-ref HEAD)"
 git -C "${REPO_DIR}" pull --ff-only origin "${BRANCH}"
 log "   -> submodule (joy_node_web) を追従"
@@ -43,14 +43,14 @@ git -C "${REPO_DIR}" submodule update --init --recursive
 # =============================================================================
 log "2. 外部依存を vcs pull"
 if command -v vcs >/dev/null 2>&1; then
-  vcs import "${WS}/src" < "${REPO_DIR}/setup/kk_rescue26_pi.repos"   # 未取得の依存を補完
+  vcs import "${WS}/src" < "${REPO_DIR}/deploy/robot/rescue_pi_system.repos"   # 未取得の依存を補完
   vcs pull "${WS}/src" || log "   (一部の vcs pull をスキップ)"
 else
   log "   (vcstool 未導入のためスキップ: env_setup.sh を実行してください)"
 fi
 
 # 配信スクリプトの実行権限を復旧(pull で失われることがある)
-chmod +x "${REPO_DIR}/camera_publisher/"*.sh "${REPO_DIR}/mic_publisher/"*.sh 2>/dev/null || true
+chmod +x "${REPO_DIR}/robot/camera_publisher/"*.sh "${REPO_DIR}/robot/mic_publisher/"*.sh 2>/dev/null || true
 
 # =============================================================================
 # 3. colcon 再ビルド

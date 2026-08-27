@@ -1,5 +1,5 @@
 # 外部依存リポジトリ定義 (vcstool 形式)
-# 取得: vcs import ~/kk_ws/src < setup/kk_rescue26_pi.repos
+# 取得: vcs import ~/kk_ws/src < deploy/robot/rescue_pi_system.repos
 # 更新: vcs pull ~/kk_ws/src
 #
 # 上流 OSS はこのリポジトリに取り込まず(ベンダリングしない)、ここで参照します。
