@@ -1,21 +1,179 @@
 {
-  "unit_ips": {
-    "1": "192.168.10.131",
-    "2": "192.168.10.132",
-    "3": "192.168.10.133",
-    "4": "192.168.10.134",
-    "5": "192.168.10.135"
+  "schema_version": 1,
+  "_comment": "号機・機器アドレスの単一の真実。addrs の並び順が経路の優先順（先頭が最優先）。ping 監視の既定対象はこのファイルから導出される（docs/protocols/state.md 参照）。",
+  "server": {
+    "host": "192.168.10.3",
+    "control_ui_port": 80,
+    "relay_port": 8080,
+    "voice_port": 8766,
+    "mic_hub_port": 8770
   },
-  "unit_addrs": {
-    "1": ["192.168.10.111", "192.168.10.131", "192.168.10.121", "kk01.local"],
-    "2": ["192.168.10.112", "192.168.10.132", "192.168.10.122", "kk02.local"],
-    "3": ["192.168.10.113", "192.168.10.133", "192.168.10.123", "kk03.local"],
-    "4": ["192.168.10.114", "192.168.10.134", "192.168.10.124", "kk04.local"],
-    "5": ["192.168.10.115", "192.168.10.135", "192.168.10.125", "kk05.local"]
+  "robot": {
+    "master_control_port": 80,
+    "joy_ws_port": 8700,
+    "joy_ws_path": "joys"
   },
   "resolve": {
     "probe_interval_sec": 3,
     "probe_timeout_sec": 1,
     "sticky": true
-  }
+  },
+  "ping": {
+    "interval_sec": 5,
+    "ping_timeout_sec": 1
+  },
+  "units": {
+    "1": {
+      "pi_id": "KK01",
+      "hostname": "kk01",
+      "addrs": [
+        {
+          "ip": "192.168.10.111",
+          "kind": "wireless",
+          "label": "無線"
+        },
+        {
+          "ip": "192.168.10.131",
+          "kind": "wireless_builtin",
+          "label": "調整無線"
+        },
+        {
+          "ip": "192.168.10.121",
+          "kind": "wired",
+          "label": "有線"
+        },
+        {
+          "host": "kk01.local",
+          "kind": "mdns",
+          "label": "mDNS"
+        }
+      ]
+    },
+    "2": {
+      "pi_id": "KK02",
+      "hostname": "kk02",
+      "addrs": [
+        {
+          "ip": "192.168.10.112",
+          "kind": "wireless",
+          "label": "無線"
+        },
+        {
+          "ip": "192.168.10.132",
+          "kind": "wireless_builtin",
+          "label": "調整無線"
+        },
+        {
+          "ip": "192.168.10.122",
+          "kind": "wired",
+          "label": "有線"
+        },
+        {
+          "host": "kk02.local",
+          "kind": "mdns",
+          "label": "mDNS"
+        }
+      ]
+    },
+    "3": {
+      "pi_id": "KK03",
+      "hostname": "kk03",
+      "addrs": [
+        {
+          "ip": "192.168.10.113",
+          "kind": "wireless",
+          "label": "無線"
+        },
+        {
+          "ip": "192.168.10.133",
+          "kind": "wireless_builtin",
+          "label": "調整無線"
+        },
+        {
+          "ip": "192.168.10.123",
+          "kind": "wired",
+          "label": "有線"
+        },
+        {
+          "host": "kk03.local",
+          "kind": "mdns",
+          "label": "mDNS"
+        }
+      ]
+    },
+    "4": {
+      "pi_id": "KK04",
+      "hostname": "kk04",
+      "addrs": [
+        {
+          "ip": "192.168.10.114",
+          "kind": "wireless",
+          "label": "無線"
+        },
+        {
+          "ip": "192.168.10.134",
+          "kind": "wireless_builtin",
+          "label": "調整無線"
+        },
+        {
+          "ip": "192.168.10.124",
+          "kind": "wired",
+          "label": "有線"
+        },
+        {
+          "host": "kk04.local",
+          "kind": "mdns",
+          "label": "mDNS"
+        }
+      ]
+    },
+    "5": {
+      "pi_id": "KK05",
+      "hostname": "kk05",
+      "addrs": [
+        {
+          "ip": "192.168.10.115",
+          "kind": "wireless",
+          "label": "無線"
+        },
+        {
+          "ip": "192.168.10.135",
+          "kind": "wireless_builtin",
+          "label": "調整無線"
+        },
+        {
+          "ip": "192.168.10.125",
+          "kind": "wired",
+          "label": "有線"
+        },
+        {
+          "host": "kk05.local",
+          "kind": "mdns",
+          "label": "mDNS"
+        }
+      ]
+    }
+  },
+  "infra": [
+    {
+      "name": "オペレータ1",
+      "ip": "192.168.10.1"
+    },
+    {
+      "name": "オペレータ2",
+      "ip": "192.168.10.2"
+    },
+    {
+      "name": "サーバRTX",
+      "ip": "192.168.10.3"
+    },
+    {
+      "name": "エンジニア1",
+      "ip": "192.168.10.4"
+    },
+    {
+      "name": "エンジニア2",
+      "ip": "192.168.10.5"
+    }
+  ]
 }

@@ -126,9 +126,9 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    # 操作画面サーバーと同じ certs/ を共有（プロジェクト直下）。
+    # 操作画面サーバーと同じ certs/ を共有（リポジトリ直下）。
     # 証明書があれば wss(HTTPS) で起動する。SSL_CERT / SSL_KEY で上書き可。
-    base = Path(__file__).resolve().parent.parent
+    base = Path(__file__).resolve().parents[2]   # server/voice_comm → リポジトリ直下
     cert = os.environ.get("SSL_CERT") or str(base / "certs" / "cert.pem")
     key = os.environ.get("SSL_KEY") or str(base / "certs" / "key.pem")
     ssl_args = {}

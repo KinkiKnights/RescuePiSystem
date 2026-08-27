@@ -1,2 +1,27 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ログ・一時ファイル
+*.log
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# TLS 証明書（各自の環境で server/control_ui/make_cert.py で生成）
+certs/
+
+# 運用中に生成される設定・録音（配布物ではない）
+config/ping_devices.override.json
+recordings/
+*.wav
+*.flac
+
+# Go ビルド成果物
+server/webrtc_relay/webrtc_relay
+tools/headless_viewer/headless_viewer

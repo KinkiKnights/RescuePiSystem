@@ -36,7 +36,8 @@ except ImportError:
 
 
 def main() -> None:
-    cert_dir = Path(__file__).resolve().parent / "certs"
+    # リポジトリ直下の certs/ に生成する（control_ui と voice_comm が共有）。
+    cert_dir = Path(__file__).resolve().parents[2] / "certs"
     cert_dir.mkdir(exist_ok=True)
 
     dns_names = ["localhost"]

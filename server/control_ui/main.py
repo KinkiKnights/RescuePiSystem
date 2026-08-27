@@ -21,8 +21,17 @@ from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
-CONFIG_PATH = BASE_DIR / "config.json"
-PING_CONFIG_PATH = BASE_DIR / "ping_devices.json"
+# 設定はリポジトリ直下の config/ に集約されている（号機アドレスの単一の真実）。
+REPO_ROOT = BASE_DIR.parents[1]
+CONFIG_PATH = Path(os.environ.get("RESCUE_UNITS_CONFIG") or REPO_ROOT / "config" / "units.json")
+# ping 監視対象は units.json から導出した既定値を使う。UI から編集した内容だけを
+# 下記の override ファイルへ保存する（git 管理外。既定値は常に units.json 由来）。
+PING_CONFIG_PATH = Path(
+    os.environ.get("RESCUE_PING_CONFIG") or REPO_ROOT / "config" / "ping_devices.override.json"
+)
+# 自己署名証明書はリポジトリ直下の certs/ に置き、control_ui と voice_comm で共有する
+# （make_cert.py が生成。git 管理外）。
+CERT_DIR = Path(os.environ.get("RESCUE_CERT_DIR") or REPO_ROOT / "certs")
 
 GROUP_TASK_NAMES = ["現着", "音声解析", "QR解析", "顔色", "搬送"]
 
@@ -51,7 +60,7 @@ def _parse_norm_coord(coord: Any) -> dict[str, float] | None:
 # ===== 5号機 自動走行（暗室座標を目標に joy_node_web へ set_goal / cancel_goal） =====
 # フィールドは 1800×1800mm の正方形。暗室座標は 0..1 正規化（左上=(0,0)・右下=(1,1)、
 # nx=右方向・ny=下方向）。目標コマンドはメートル・map フレームで送る。
-# 座標系は RescuePiSystem:ros2/joy_node_web/docs/COMMUNICATION_SPEC.md「4. 座標系」に従う。
+# 座標系は robot/ros2/joy_node_web/docs/COMMUNICATION_SPEC.md「4. 座標系」に従う。
 FIELD_SIZE_M = 1.8  # 1800mm
 
 # ロボットへコマンドを送る WebSocket（既存の joy 接続と同一 = ws://<ip>:8700/joys）
@@ -125,48 +134,35 @@ async def _send_robot_command(ip: str, payload: dict[str, Any]) -> bool:
         return False
 
 
-def load_unit_ips() -> dict[int, str]:
-    """config.json から号機ごとの固定 IP を読み込む。
+def load_units_config() -> dict[str, Any]:
+    """config/units.json を読み込む（号機・機器アドレスの単一の真実）。
 
-    IP は運用上の固定設定であり、マスター等クライアントからは変更不可。
-    config.json が無い/壊れている場合は警告を出し、空 IP で起動を継続する。
+    無い/壊れている場合は警告を出し、空設定で起動を継続する（従来と同じ方針）。
     """
-    defaults = {i: "" for i in range(1, 6)}
     try:
         with CONFIG_PATH.open(encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        print(f"[WARN] {CONFIG_PATH} が見つかりません。号機 IP は空で起動します。")
-        return defaults
+        print(f"[WARN] {CONFIG_PATH} が見つかりません。号機アドレスは空で起動します。")
+        return {}
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[WARN] {CONFIG_PATH} を読み込めませんでした（{exc}）。号機 IP は空で起動します。")
-        return defaults
-
-    ips = defaults
-    raw = data.get("unit_ips", {}) if isinstance(data, dict) else {}
-    if isinstance(raw, dict):
-        for k, v in raw.items():
-            try:
-                n = int(k)
-            except (ValueError, TypeError):
-                continue
-            if 1 <= n <= 5:
-                ips[n] = str(v).strip()
-    else:
-        print(f"[WARN] {CONFIG_PATH} の unit_ips が不正な形式です。号機 IP は空で起動します。")
-    return ips
+        print(f"[WARN] {CONFIG_PATH} を読み込めませんでした（{exc}）。号機アドレスは空で起動します。")
+        return {}
+    if not isinstance(data, dict):
+        print(f"[WARN] {CONFIG_PATH} が不正な形式です。号機アドレスは空で起動します。")
+        return {}
+    return data
 
 
-# 号機ごとの固定 IP（config.json 由来・変更不可の設定値）
-UNIT_IPS = load_unit_ips()
+# units.json は起動時に 1 度だけ読む（運用上の固定設定。クライアントからは変更不可）。
+UNITS_CONFIG = load_units_config()
 
 
 # ===== 号機 宛先マルチパス化（候補アドレス多重化＋live経路の自動選択） =====
-# unit_addrs: 号機ごとの「優先順の候補アドレス配列」。優先順は
+# units[n].addrs: 号機ごとの「優先順の候補アドレス配列」。並び順がそのまま優先順で、
 #   192.168.10.11N(無線/最優先) > 192.168.10.13N(調整用WiFi) >
 #   192.168.10.12N(有線) > kk0N.local(mDNSフォールバック)。
-# 号機側は全経路 0.0.0.0 で待受＝どの候補でも応答する前提。unit_addrs 未定義の
-# 号機は後方互換で unit_ips の単一値を 1 要素配列として扱う。
+# 号機側は全経路 0.0.0.0 で待受＝どの候補でも応答する前提。
 RESOLVE_DEFAULTS: dict[str, Any] = {
     "probe_interval_sec": 3.0,
     "probe_timeout_sec": 1.0,
@@ -174,60 +170,40 @@ RESOLVE_DEFAULTS: dict[str, Any] = {
 }
 
 
+def _addr_str(entry: Any) -> str:
+    """addrs の 1 要素を宛先文字列にする（{"ip":…} / {"host":…} / 素の文字列）。"""
+    if isinstance(entry, dict):
+        return str(entry.get("ip") or entry.get("host") or "").strip()
+    return str(entry).strip()
+
+
 def load_unit_addrs() -> dict[int, list[str]]:
-    """config.json の unit_addrs を号機→優先順候補配列で読み込む。
-
-    unit_addrs が無い/空の号機は unit_ips の単一値を 1 要素配列に落として後方互換。
-    config.json が無い/壊れている場合は unit_ips 由来（＝UNIT_IPS）のみで構成する。
-    """
+    """units.json の units[n].addrs を号機→優先順候補配列で読み込む。"""
     addrs: dict[int, list[str]] = {i: [] for i in range(1, 6)}
-    data: Any = {}
-    try:
-        with CONFIG_PATH.open(encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        print(f"[WARN] {CONFIG_PATH} が見つかりません。号機候補アドレスは unit_ips のみで構成します。")
-        data = {}
-    except (json.JSONDecodeError, OSError) as exc:
-        print(f"[WARN] {CONFIG_PATH} を読み込めませんでした（{exc}）。号機候補アドレスは unit_ips のみで構成します。")
-        data = {}
-
-    raw = data.get("unit_addrs", {}) if isinstance(data, dict) else {}
-    if isinstance(raw, dict):
-        for k, v in raw.items():
-            try:
-                n = int(k)
-            except (ValueError, TypeError):
-                continue
-            if not (1 <= n <= 5) or not isinstance(v, list):
-                continue
-            cands: list[str] = []
-            for a in v:
-                s = str(a).strip()
-                if s and s not in cands:
-                    cands.append(s)
-            addrs[n] = cands
-    else:
-        print(f"[WARN] {CONFIG_PATH} の unit_addrs が不正な形式です。unit_ips のみで構成します。")
-
-    # 後方互換: 候補が空の号機は unit_ips の単一値を 1 要素配列にする。
-    for n in range(1, 6):
-        if not addrs[n]:
-            single = UNIT_IPS.get(n, "")
-            addrs[n] = [single] if single else []
+    raw = UNITS_CONFIG.get("units", {})
+    if not isinstance(raw, dict):
+        print(f"[WARN] {CONFIG_PATH} の units が不正な形式です。号機アドレスは空で起動します。")
+        return addrs
+    for k, v in raw.items():
+        try:
+            n = int(k)
+        except (ValueError, TypeError):
+            continue
+        if not (1 <= n <= 5) or not isinstance(v, dict):
+            continue
+        cands: list[str] = []
+        for a in v.get("addrs", []) if isinstance(v.get("addrs"), list) else []:
+            sv = _addr_str(a)
+            if sv and sv not in cands:
+                cands.append(sv)
+        addrs[n] = cands
     return addrs
 
 
 def load_resolve_config() -> dict[str, Any]:
-    """config.json の resolve 設定（probe 間隔・タイムアウト・sticky）を読み込む。"""
+    """units.json の resolve 設定（probe 間隔・タイムアウト・sticky）を読み込む。"""
     cfg = dict(RESOLVE_DEFAULTS)
-    data: Any = {}
-    try:
-        with CONFIG_PATH.open(encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return cfg
-    raw = data.get("resolve", {}) if isinstance(data, dict) else {}
+    raw = UNITS_CONFIG.get("resolve", {})
     if isinstance(raw, dict):
         try:
             cfg["probe_interval_sec"] = (
@@ -326,8 +302,11 @@ class UnitRouteResolver:
         return self.current.get(n)
 
 
-# 号機→優先順候補配列（config.json 由来・固定設定）と経路選択器の実体
+# 号機→優先順候補配列（units.json 由来・固定設定）と経路選択器の実体
 UNIT_ADDRS = load_unit_addrs()
+# 号機ごとの代表 IP。候補配列の先頭から導出する派生値で、live 経路が決まるまでの
+# 初期値として使う（設定ファイルに単一 IP は持たない）。
+UNIT_IPS: dict[int, str] = {n: (a[0] if a else "") for n, a in UNIT_ADDRS.items()}
 RESOLVE_CONFIG = load_resolve_config()
 resolver = UnitRouteResolver(UNIT_ADDRS, bool(RESOLVE_CONFIG["sticky"]))
 
@@ -341,46 +320,87 @@ def resolve_unit_addr(n: int) -> str | None:
 PING_DEFAULTS: dict[str, Any] = {"interval_sec": 5, "ping_timeout_sec": 1, "devices": []}
 
 
-def load_ping_config() -> dict[str, Any]:
-    """ping_devices.json から監視対象と間隔・タイムアウトを読み込む。
+def default_ping_devices() -> list[dict[str, str]]:
+    """units.json から ping 監視対象の既定リストを導出する。
 
-    ファイルが無い/壊れている場合は既定値（5秒間隔・1秒タイムアウト・機器なし）で
-    起動を継続する。号機 IP と同じく「設定ファイル → 読み込み」方式に合わせている。
+    各号機の IP を持つ候補アドレス（mDNS 名は ping 対象にしない）を
+    「N号機 <label>」として並べ、続いて infra（オペレータ端末・サーバ等）を並べる。
+    アドレスの定義が units.json の 1 箇所に集約されるため、機器表の二重管理が無くなる。
+    """
+    devices: list[dict[str, str]] = []
+    units = UNITS_CONFIG.get("units", {})
+    if isinstance(units, dict):
+        for k in sorted(units, key=lambda x: (len(str(x)), str(x))):
+            v = units[k]
+            if not isinstance(v, dict):
+                continue
+            for a in v.get("addrs", []) if isinstance(v.get("addrs"), list) else []:
+                if not isinstance(a, dict):
+                    continue
+                ip = str(a.get("ip", "")).strip()
+                if not ip:            # mDNS など IP を持たない候補は ping しない
+                    continue
+                label = str(a.get("label", "")).strip()
+                devices.append({"name": f"{k}号機 {label}".strip(), "ip": ip})
+    infra = UNITS_CONFIG.get("infra", [])
+    if isinstance(infra, list):
+        for d in infra:
+            if not isinstance(d, dict):
+                continue
+            ip = str(d.get("ip", "")).strip()
+            if ip:
+                devices.append({"name": str(d.get("name", "")).strip(), "ip": ip})
+    return devices
+
+
+def load_ping_config() -> dict[str, Any]:
+    """ping 監視設定を読み込む。
+
+    既定は units.json 由来（間隔・タイムアウトは `ping` セクション、対象は
+    `default_ping_devices()` で導出）。UI から編集された場合のみ override
+    ファイル（PING_CONFIG_PATH・git 管理外）が存在し、そちらを優先する。
     """
     cfg: dict[str, Any] = dict(PING_DEFAULTS)
-    cfg["devices"] = []
+    raw_defaults = UNITS_CONFIG.get("ping", {})
+    if isinstance(raw_defaults, dict):
+        for key, fallback in (("interval_sec", 5), ("ping_timeout_sec", 1)):
+            try:
+                cfg[key] = float(raw_defaults.get(key, fallback)) or fallback
+            except (TypeError, ValueError):
+                cfg[key] = fallback
+    cfg["devices"] = default_ping_devices()
+
     try:
         with PING_CONFIG_PATH.open(encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        print(f"[WARN] {PING_CONFIG_PATH} が見つかりません。ping 監視対象は空で起動します。")
-        return cfg
+        return cfg                      # override 無し = units.json の既定値で運用
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[WARN] {PING_CONFIG_PATH} を読み込めませんでした（{exc}）。ping 監視対象は空で起動します。")
+        print(f"[WARN] {PING_CONFIG_PATH} を読み込めませんでした（{exc}）。units.json の既定値を使います。")
         return cfg
 
     if not isinstance(data, dict):
-        print(f"[WARN] {PING_CONFIG_PATH} が不正な形式です。ping 監視対象は空で起動します。")
+        print(f"[WARN] {PING_CONFIG_PATH} が不正な形式です。units.json の既定値を使います。")
         return cfg
 
     try:
-        cfg["interval_sec"] = float(data.get("interval_sec", 5)) or 5
+        cfg["interval_sec"] = float(data.get("interval_sec", cfg["interval_sec"])) or cfg["interval_sec"]
     except (TypeError, ValueError):
-        cfg["interval_sec"] = 5
+        pass
     try:
-        cfg["ping_timeout_sec"] = float(data.get("ping_timeout_sec", 1)) or 1
+        cfg["ping_timeout_sec"] = float(data.get("ping_timeout_sec", cfg["ping_timeout_sec"])) or cfg["ping_timeout_sec"]
     except (TypeError, ValueError):
-        cfg["ping_timeout_sec"] = 1
+        pass
 
-    devices: list[dict[str, str]] = []
-    raw_devices = data.get("devices", [])
+    raw_devices = data.get("devices")
     if isinstance(raw_devices, list):
+        devices: list[dict[str, str]] = []
         for d in raw_devices:
             if isinstance(d, dict):
                 ip = str(d.get("ip", "")).strip()
                 if ip:
                     devices.append({"name": str(d.get("name", "")).strip(), "ip": ip})
-    cfg["devices"] = devices
+        cfg["devices"] = devices
     return cfg
 
 
@@ -418,7 +438,11 @@ def validate_ping_config(cfg: Any) -> dict[str, Any]:
 
 
 def save_ping_config(cfg: dict[str, Any]) -> None:
-    """ping 設定を ping_devices.json へ保存する（上書き）。"""
+    """UI から編集された ping 設定を override ファイルへ保存する（上書き）。
+
+    units.json（配布物）は書き換えない。override を削除すれば既定値へ戻る。
+    """
+    PING_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with PING_CONFIG_PATH.open("w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
         f.write("\n")
@@ -478,7 +502,7 @@ async def _ping_loop() -> None:
     """各機器を interval 秒周期でまとめて ping し、結果を ping_state にキャッシュする。
 
     イベントループをブロックしないよう asyncio サブプロセスで並行実行する。
-    ping_devices.json は毎周期読み直すため、設定変更（POST）は次周期で反映される。
+    ping 設定は毎周期読み直すため、設定変更（POST）は次周期で反映される。
     """
     while True:
         cfg = load_ping_config()
@@ -781,7 +805,7 @@ connections: dict[str, set[WebSocket]] = {
 }
 
 
-VOICE_DIR = BASE_DIR / "voice_comm"
+VOICE_DIR = BASE_DIR.parent / "voice_comm"   # server/voice_comm（隣のディレクトリ）
 
 app = FastAPI(title="Rescue Robot Dummy Apps")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -1254,8 +1278,8 @@ async def post_master(body: dict[str, Any]) -> dict[str, str]:
                     t["done"] = True
                     break
         elif action == "set_unit_ips":
-            # 号機 IP は config.json 固定・変更不可。クライアントからの変更要求は無視。
-            print("[WARN] set_unit_ips は無効化されています（号機 IP は config.json 固定）。要求を無視しました。")
+            # 号機 IP は config/units.json 固定・変更不可。クライアントからの変更要求は無視。
+            print("[WARN] set_unit_ips は無効化されています（号機 IP は config/units.json 固定）。要求を無視しました。")
         elif action == "reset":
             state.reset()
     snap = state.snapshot()
@@ -1599,8 +1623,8 @@ def _ssl_args() -> dict[str, str]:
     """
     import os
 
-    cert = os.environ.get("SSL_CERT") or str(BASE_DIR / "certs" / "cert.pem")
-    key = os.environ.get("SSL_KEY") or str(BASE_DIR / "certs" / "key.pem")
+    cert = os.environ.get("SSL_CERT") or str(CERT_DIR / "cert.pem")
+    key = os.environ.get("SSL_KEY") or str(CERT_DIR / "key.pem")
     if Path(cert).exists() and Path(key).exists():
         print(f"[HTTPS] {cert} / {key} を使用します（https://<host>:8765/）")
         return {"ssl_certfile": cert, "ssl_keyfile": key}

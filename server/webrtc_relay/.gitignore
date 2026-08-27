@@ -1,7 +1,0 @@
-# Goビルド成果物
-/relay/relay
-/tools/headless-viewer/headless-viewer
-
-# Python
-__pycache__/
-*.pyc
