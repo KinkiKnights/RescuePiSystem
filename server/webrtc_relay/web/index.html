@@ -24,7 +24,7 @@
 <body>
 <header>
   <h1>📷 WebRTC Camera</h1>
-  ID: <input id="pid" value="PI01" maxlength="6" placeholder="PI01">
+  ID: <input id="pid" value="KK01" maxlength="6" placeholder="KK01">
   <button id="connect">接続</button>
   <span class="sep"></span>
   <span>カメラ:</span>
@@ -57,7 +57,7 @@ const cam = new WebRTCCamera({
 });
 
 document.getElementById('connect').onclick = () => {
-  cam.connect(video, pidInput.value.trim() || 'PI01');
+  cam.connect(video, pidInput.value.trim() || 'KK01');
   setActiveCam(1); // 初期値1 (Pi側の既定と一致)
 };
 
@@ -73,7 +73,7 @@ function setActiveCam(n) {
   camBtns.forEach((b) => b.classList.toggle('active', Number(b.dataset.cam) === n));
 }
 
-// 起動時に自動接続 (URLに ?id=PI02 があればそれを使う)
+// 起動時に自動接続 (URLに ?id=KK02 があればそれを使う)
 const qid = new URLSearchParams(location.search).get('id');
 if (qid) pidInput.value = qid;
 cam.connect(video, pidInput.value.trim());

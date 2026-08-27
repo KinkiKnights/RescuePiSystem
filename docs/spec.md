@@ -16,7 +16,7 @@
   対応号機バッジ（`room_units` 由来）。control / engineer はクリックで完了可能、analytics は閲覧のみ。
   `RC.renderTasks()` で描画。
 - **音声 PTT**: 全画面に組み込み（`voice-client.js`）。PC はスペースキー、報告者モードは画面下部の送話ボタン。
-- **映像ソース**: WebRTC（実機カメラ）のみ。号機 1〜5 → カメラ ID `RES1`〜`RES5`。
+- **映像ソース**: WebRTC（実機カメラ）のみ。号機 1〜5 → カメラ ID `KK01`〜`KK05`。
   中継先はマスターから設定。詳細は STATE_AND_PROTOCOL.md「映像」節。
 
 ---

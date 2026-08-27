@@ -6,14 +6,14 @@ WebRTCカメラパブリッシャ (Raspberry Pi 用 / GStreamer webrtcbin) — �
 パブリッシャは offerer (webrtcbinがオファーを生成)。
 
 特徴:
-  - 接続時に自分のID(PI_ID, 4文字程度)をrelayへ申告。ビュアーはこのIDで視聴対象を選ぶ。
+  - 接続時に自分のID(PI_ID = KK0N)をrelayへ申告。ビュアーはこのIDで視聴対象を選ぶ。
   - 複数の入力ソースを input-selector に束ね、camChangeで無停止に切替える(再ネゴ不要)。
   - カメラ番号: 1 = カメラ(初期値), 2.. = 追加カメラ。
     画面取得(0)は既定で無効(待機ソースのCPU上積みを避けるため)。CAM0設定で有効化可。
   - 全ソースを共通解像度にスケールするので、エンコーダ/トラックは安定したまま。
 
 環境変数:
-  PI_ID       : このPiのID (既定 "PI01")
+  PI_ID       : このPiのID。KK0N 形式 (既定: ホスト名の大文字化。kk05 -> KK05)
   SERVER      : relayのWS URL (既定 ws://127.0.0.1:8080/ws)
   WIDTH/HEIGHT/FPS : 共通出力解像度 (既定 1280/720/30)
   ENCODER     : エンコード部 (既定 x264enc ... / Pi4は v4l2h264enc)
@@ -24,6 +24,7 @@ WebRTCカメラパブリッシャ (Raspberry Pi 用 / GStreamer webrtcbin) — �
 通常はラッパースクリプト(publish-pi4.sh 等)経由で起動する。
 """
 import os
+import socket
 import sys
 import json
 import asyncio
@@ -39,7 +40,10 @@ import websockets  # noqa: E402
 
 Gst.init(None)
 
-PI_ID = os.environ.get("PI_ID", "PI01")
+# 号機 ID は KK0N 形式に統一する（config/units.json の units[n].pi_id と一致させる）。
+# 操作画面は "KK" + 号機番号2桁 を購読するので、ここが違うと映像が出ない。
+# 既定はホスト名の大文字化（kk05 -> KK05）。
+PI_ID = os.environ.get("PI_ID") or socket.gethostname().split(".")[0].upper()
 SERVER = os.environ.get("SERVER", "ws://127.0.0.1:8080/ws")
 WIDTH = os.environ.get("WIDTH", "1280")
 HEIGHT = os.environ.get("HEIGHT", "720")

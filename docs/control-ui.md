@@ -72,7 +72,7 @@ iPhone で `https://<このPCのIP>/reporter` を開き、証明書の警告を�
 
 映像ソースは WebRTC（機体上カメラの中継）のみです。同じリポジトリの中継サーバー
 （[`server/webrtc_relay/`](../server/webrtc_relay/)・Go・ポート 8080）を起動すると、各画面に
-リアルタイム映像が表示されます。号機 1〜5 がカメラ ID `RES1`〜`RES5` に対応します。
+リアルタイム映像が表示されます。号機 1〜5 がカメラ ID `KK01`〜`KK05` に対応します（`config/units.json` の `pi_id`）。
 中継先はマスターモードで指定（空なら画面ホストの 8080 を自動推定）。ストリーム未接続時は
 「映像 No Connect」プレースホルダーが表示されます。詳細は
 [`docs/protocols/state.md`](protocols/state.md) の「映像」節。

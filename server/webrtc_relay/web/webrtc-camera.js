@@ -2,7 +2,7 @@
 //
 // 使い方:
 //   const cam = new WebRTCCamera();                 // serverは現在のホストから自動推定
-//   cam.connect(videoElement, "PI01");              // ビデオ要素とPiのID(4文字程度)を渡すと自動接続
+//   cam.connect(videoElement, "KK01");              // ビデオ要素と号機ID(KK0N)を渡すと自動接続
 //   cam.camChange(0);                               // カメラ番号切替 (0=スクリーン, 1=カメラ, 2..)
 //   cam.disconnect();
 //

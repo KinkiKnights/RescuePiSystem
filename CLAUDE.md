@@ -21,6 +21,9 @@
    実 `.service` はコミットせず、`install_unit`（`deploy/systemd/install_unit.sh`）で
    展開・設置する。スクリプト内にユニット本文を書き写さない。
 5. **アドレス・ポートは `config/units.json`。** コードやスクリプトに IP を直書きしない。
+   **号機 ID は `KK0N` に統一**（`units[n].pi_id` / camera_publisher の `PI_ID` /
+   操作画面が購読する ID / relay の `/pis` がすべて同じ文字列になる）。
+   `RES0N` や `PI0N` といった別系統の ID を新たに作らない。
 6. **号機ごとの運用値は `/etc/default/*`。** リポジトリ内の設定ファイルに書くと
    `git pull` で差分が巻き戻る（`programs.json` で実際に起きた）。
 

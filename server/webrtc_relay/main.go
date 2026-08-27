@@ -64,7 +64,7 @@ func (c *client) send(m sigMsg) {
 type sigMsg struct {
 	Type      string                     `json:"type"`                // hello/offer/answer/candidate/camChange/error
 	Role      string                     `json:"role,omitempty"`      // publisher/viewer
-	ID        string                     `json:"id,omitempty"`        // PiのID
+	ID        string                     `json:"id,omitempty"`        // 号機ID (KK0N)
 	SDP       *webrtc.SessionDescription `json:"sdp,omitempty"`       // offer/answer
 	Candidate *webrtc.ICECandidateInit   `json:"candidate,omitempty"` // ICE
 	Cam       *int                       `json:"cam,omitempty"`       // camChangeのカメラ番号(0=screen)
@@ -144,7 +144,13 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			role = msg.Role
 			switch role {
 			case "publisher":
-				myID = orDefault(msg.ID, "PI01")
+				// 号機 ID は KK0N に統一。既定値で代替すると号機1の枠を
+				// 奪う事故になり得るので、id 無しは受け付けない。
+				if msg.ID == "" {
+					cl.send(sigMsg{Type: "error", Message: "publisher must send id (KK0N)"})
+					continue
+				}
+				myID = msg.ID
 				pc = setupPublisher(cl, myID)
 				log.Printf("publisher[%s] connected", myID)
 			case "viewer":
@@ -370,11 +376,4 @@ func requestKeyframe(s *stream) {
 		return
 	}
 	_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: ssrc}})
-}
-
-func orDefault(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
 }

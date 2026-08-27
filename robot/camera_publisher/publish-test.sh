@@ -5,12 +5,14 @@
 #     (例: CAM0="videotestsrc pattern=smpte" / 実画面は ximagesrc・pipewiresrc)
 #
 # 使い方:
-#   PI_ID=PI01 ./publish-test.sh
-#   PI_ID=PI02 SERVER=ws://127.0.0.1:8080/ws ./publish-test.sh   # 2台目Pi役
+#   PI_ID=KK01 ./publish-test.sh
+#   PI_ID=KK02 SERVER=ws://127.0.0.1:8080/ws ./publish-test.sh   # 2台目Pi役
 set -e
 cd "$(dirname "$0")"
 
-export PI_ID="${PI_ID:-PI01}"
+# 号機 ID は KK0N 形式に統一 (config/units.json の pi_id と一致させる)。
+# 既定はホスト名の大文字化 (kk05 -> KK05)。操作画面は "KK"+号機番号2桁 を購読する。
+export PI_ID="${PI_ID:-$(hostname | cut -d. -f1 | tr '[:lower:]' '[:upper:]')}"
 export SERVER="${SERVER:-ws://127.0.0.1:8080/ws}"
 export DEFAULT_CAM="${DEFAULT_CAM:-1}"
 

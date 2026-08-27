@@ -87,5 +87,9 @@ git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git ~/kk_ws/src
 `units[n].addrs` は**優先順の候補配列**（無線 → 調整無線 → 有線 → mDNS）で、
 control_ui が live な経路を自動採用する。ping 監視の対象もここから導出される。
 
+**号機 ID は `KK01`〜`KK05` で統一**している（`units[n].pi_id`）。カメラ配信の
+`PI_ID` は既定でホスト名を大文字化するので、ホスト名を `kk0N` にしておけば
+操作画面が購読する ID と自動で一致する。
+
 号機ごとの運用値（マイクのデバイス番号など）は `/etc/default/*` に置く。
 リポジトリ内の設定ファイルに書くと `git pull` で号機固有の差分が巻き戻るため。

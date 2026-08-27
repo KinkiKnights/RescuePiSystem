@@ -158,10 +158,10 @@ ws://<host>/ws/<role>
 各画面のカメラ映像は **WebRTC（機体上カメラ中継）のみ**です。以前あったローカル動画ファイル
 （`video/<号機>.mp4`）を再生する「ダミー映像」機能は廃止されました。
 
-- 号機 `n` → カメラ ID **`RES<n>`**（RES1〜RES5）。
+- 号機 `n` → カメラ ID **`KK0<n>`**（KK01〜KK05。`config/units.json` の `pi_id` と一致）。
   - 中継サーバー（SFU）は同じリポジトリの [`server/webrtc_relay/`](../../server/webrtc_relay/)（Go・既定ポート 8080）。
     このアプリには含まれないため別途起動が必要。
-  - 視聴クライアントは `/static/webrtc-camera.js`（実体は `server/webrtc_relay/web/webrtc-camera.js`）（`new WebRTCCamera({server}).connect(videoEl, "RES1")`）。
+  - 視聴クライアントは `/static/webrtc-camera.js`（実体は `server/webrtc_relay/web/webrtc-camera.js`）（`new WebRTCCamera({server}).connect(videoEl, "KK01")`）。
   - 中継先は `webrtc_server`（空なら `ws://<画面を開いたホスト>:8080/ws` を自動推定）。
   - ストリーム未接続時は「映像 No Connect」プレースホルダーを表示。
   - 号機以外の映像枠（overview 等）は WebRTC 対象外のため常に「No Connect」表示。

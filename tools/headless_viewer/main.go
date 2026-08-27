@@ -34,7 +34,7 @@ func main() {
 	server := flag.String("server", "ws://127.0.0.1:8080/ws", "relay WS URL")
 	out := flag.String("out", "/tmp/received.h264", "保存先H.264ファイル")
 	dur := flag.Duration("dur", 5*time.Second, "受信時間")
-	id := flag.String("id", "PI01", "視聴対象のPi ID")
+	id := flag.String("id", "KK01", "視聴対象の号機ID (KK0N)")
 	cam := flag.Int("cam", -1, "接続後に切替えるカメラ番号(>=0で有効)")
 	camAt := flag.Duration("camAt", 2*time.Second, "camChangeを送るまでの待ち時間")
 	flag.Parse()

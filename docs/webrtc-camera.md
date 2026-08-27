@@ -21,10 +21,10 @@
 ```
  複数のRaspberry Pi                高性能な中継サーバー (SFU)            複数ブラウザ
 ┌──────────────────┐  WebRTC      ┌──────────────────────────┐ WebRTC  ┌──────────┐
-│ PI01: cam/screen  │ ──publish──▶ │ ID毎にストリーム管理        │ ──────▶ │ ?id=PI01 │
+│ KK01: cam/screen  │ ──publish──▶ │ ID毎にストリーム管理        │ ──────▶ │ ?id=KK01 │
 │ (input-selector)  │             │ ・RTPファンアウト(再エンコ無) │        └──────────┘
 ├──────────────────┤             │ ・WebSocketシグナリング      │ ──────▶ ┌──────────┐
-│ PI02: cam/screen  │ ──publish──▶ │ ・camChangeを該当Piへ転送    │         │ ?id=PI02 │
+│ KK02: cam/screen  │ ──publish──▶ │ ・camChangeを該当Piへ転送    │         │ ?id=KK02 │
 └──────────────────┘             │ ・Web静的配信               │         └──────────┘
                                   └──────────────────────────┘
    camChange(n) ◀───── 制御メッセージを逆流して該当Piへ転送 ◀─────── ビュアー操作
@@ -83,7 +83,7 @@ const cam = new WebRTCCamera({
   onStats:  (st) => {},              // {width,height,kbps,fps,jitterMs} 1秒ごと
 });
 
-cam.connect(videoElement, "PI01");   // ビデオ要素とPiのID(4文字程度)を渡すと自動接続
+cam.connect(videoElement, "KK01");   // ビデオ要素と号機ID(KK0N)を渡すと自動接続
 cam.camChange(0);                    // 0=スクリーン
 cam.camChange(1);                    // 1=カメラ(初期値)
 cam.camChange(2);                    // 2=追加カメラ
@@ -109,7 +109,7 @@ curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/de
 curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/app_setup.sh | bash
 # 中継PCを指定し systemd常駐 (Pi4=HW):
 curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/deploy/robot/app_setup.sh \
-  | PI_ID=PI01 SERVER=ws://<中継PCのIP>:8080/ws MODEL=pi4 bash -s -- --service
+  | PI_ID=KK01 SERVER=ws://<中継PCのIP>:8080/ws MODEL=pi4 bash -s -- --service
 ```
 - GStreamer(webrtcbin/HWエンコード)とPython依存を導入し、`webrtcbin`が使えるか自動検証。
 
@@ -140,10 +140,10 @@ cd relay && go build -o relay .       # 初回のみ
 ### 2. Raspberry Piでパブリッシャを起動（各Piで、IDを変える）
 
 ```bash
-# Pi4 (HWエンコード)、ID=PI01
-PI_ID=PI01 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi4.sh
-# Pi5 (SWエンコード)、ID=PI02
-PI_ID=PI02 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
+# Pi4 (HWエンコード)、ID=KK01
+PI_ID=KK01 SERVER=ws://<サーバーIP>:8080/ws ./robot/camera_publisher/publish-pi4.sh
+# Pi5 (SWエンコード)、ID=KK02
+PI_ID=KK02 SERVER=ws://<サーバーIP>:8080/ws ./robot/camera_publisher/publish-pi5.sh
 ```
 
 カメラ/パラメータは環境変数で上書き（各スクリプト冒頭のコメント参照）:
@@ -156,7 +156,7 @@ PI_ID=PI02 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
 ### 3. ブラウザで視聴
 
 `http://<サーバーIP>:8080/` を開き、IDを入力して「接続」。
-`http://<サーバーIP>:8080/?id=PI02` のようにURLでID指定も可。
+`http://<サーバーIP>:8080/?id=KK02` のようにURLでID指定も可。
 ヘッダーのカメラ番号ボタン(0/1/2)で切替。
 
 ## このPC(Ubuntu 24.04)での動作確認
@@ -167,17 +167,17 @@ PI_ID=PI02 SERVER=ws://<サーバーIP>:8080/ws ./publisher/publish-pi5.sh
 # 中継サーバー
 ./relay/relay -addr :8080 -web web &
 
-# Pi役1 (PI01): 1=実Webカメラ, 2=ボール (画面取得は既定で無効)
-PI_ID=PI01 ./publisher/publish-test.sh &
+# Pi役1 (KK01): 1=実Webカメラ, 2=ボール (画面取得は既定で無効)
+PI_ID=KK01 ./robot/camera_publisher/publish-test.sh &
 
-# Pi役2 (PI02): 合成映像のみ (Webカメラは1台しか開けないため)
-PI_ID=PI02 CAM1="videotestsrc pattern=snow" CAM2="videotestsrc pattern=circular" \
-  ./publisher/publish-test.sh &
+# Pi役2 (KK02): 合成映像のみ (Webカメラは1台しか開けないため)
+PI_ID=KK02 CAM1="videotestsrc pattern=snow" CAM2="videotestsrc pattern=circular" \
+  ./robot/camera_publisher/publish-test.sh &
 
-# ブラウザで http://localhost:8080/ (ID=PI01) / ?id=PI02 を開く
+# ブラウザで http://localhost:8080/ (ID=KK01) / ?id=KK02 を開く
 # またはヘッドレス視聴クライアントで機械的に検証:
-go build -o tools/headless-viewer/headless-viewer ./tools/headless-viewer
-tools/headless-viewer/headless-viewer -id PI01 -dur 6s -cam 0 -camAt 1s -out /tmp/x.h264
+go build -o tools/headless_viewer/headless_viewer ./tools/headless-viewer
+tools/headless_viewer/headless_viewer -id KK01 -dur 6s -cam 0 -camAt 1s -out /tmp/x.h264
 ffmpeg -i /tmp/x.h264 -update 1 /tmp/last.png   # 切替後(画面=カラーバー)が映る
 ```
 
@@ -185,9 +185,9 @@ ffmpeg -i /tmp/x.h264 -update 1 /tmp/last.png   # 切替後(画面=カラーバ�
 
 - 実Webカメラ → GStreamer(x264/input-selector) → webrtcbin → relay(Pion SFU) → 視聴 が疎通。
   受信は **1280x720 / H.264 Constrained Baseline / 約2.5Mbps** でデコード可能。
-- **複数ラズパイのID指定ルーティング**: PI01/PI02を同時接続し、`?id=`で別々の映像を取得。
-  `GET /pis` で `["PI01","PI02"]` を確認。
-- **camChange**: ビュアーから PI01 を `1`(Webカメラ) / `2`(ボール) へ無停止で切替えられることを、
+- **複数ラズパイのID指定ルーティング**: KK01/KK02を同時接続し、`?id=`で別々の映像を取得。
+  `GET /pis` で `["KK01","KK02"]` を確認。
+- **camChange**: ビュアーから KK01 を `1`(Webカメラ) / `2`(ボール) へ無停止で切替えられることを、
   各切替後のデコードフレームで確認（画面取得`0`はCAM0設定時のみ有効）。
 - **ファンアウト**: 複数ビュアー同時接続で各自が同一ストリームを受信（Pi上りは1本のまま）。
 - ヘッドレス視聴はブラウザと同一の署名/SDP/ICE/RTP/camChange経路を通るため、
