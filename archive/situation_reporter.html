@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1419" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>状況報告 — レスキューロボコン</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e6edf3;
+      --muted: #8b9cb3;
+      --accent: #3d8bfd;
+      --ok: #3fb950;
+      --danger: #f85149;
+      --cue-new: #7ee787;
+      --header-h: 52px;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --font: "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      height: 100dvh;
+      padding-top: var(--safe-top);
+      padding-bottom: var(--safe-bottom);
+    }
+
+    /* ── ヘッダー ── */
+    .app-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      min-height: var(--header-h);
+      padding: 0.5rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .app-header__title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      padding: 0.3rem 0.65rem;
+      border-radius: 999px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .status.connected .status-dot { background: var(--ok); }
+    .status.connecting .status-dot {
+      background: var(--accent);
+      animation: blink 0.9s ease-in-out infinite;
+    }
+    .status.error .status-dot { background: var(--danger); }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    /* ── ルーム一覧 ── */
+    .rooms-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding: 0.65rem 0.75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .room-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .room-section__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.15);
+    }
+
+    .room-section__title {
+      margin: 0;
+      font-size: 0.875rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+
+    .room-section__count {
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .room-section__count strong {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* 完了済みサマリー（上部・小さく） */
+    .completed-strip {
+      min-height: 0;
+      padding: 0.35rem 0.65rem 0.4rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(61, 139, 253, 0.06);
+    }
+
+    .completed-strip:empty {
+      display: none;
+    }
+
+    .completed-strip__label {
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin: 0 0 0.25rem;
+    }
+
+    .completed-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0.35rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .completed-chip {
+      font-size: 0.68rem;
+      line-height: 1.3;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* キュー */
+    .queue {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      padding: 0.55rem 0.65rem 0.65rem;
+      min-height: 3.5rem;
+    }
+
+    .queue-empty {
+      margin: 0;
+      padding: 0.75rem 0.25rem;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .queue-item {
+      position: relative;
+      overflow: hidden;
+      border-radius: 8px;
+      touch-action: pan-y;
+      user-select: none;
+    }
+
+    .queue-item__track {
+      position: relative;
+      display: flex;
+      align-items: stretch;
+      will-change: transform;
+    }
+
+    .queue-item__done-hint {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--ok);
+      background: rgba(63, 185, 80, 0.12);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
+    }
+
+    .queue-item.is-dragging .queue-item__done-hint,
+    .queue-item.is-threshold .queue-item__done-hint {
+      opacity: 1;
+    }
+
+    .queue-item__card {
+      flex: 1;
+      min-width: 100%;
+      padding: 0.65rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      border-left: 3px solid var(--border);
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .queue-item--new .queue-item__card {
+      border-left-color: var(--cue-new);
+      background: rgba(126, 231, 135, 0.06);
+      animation: cueIn 0.45s ease-out;
+    }
+
+    @keyframes cueIn {
+      from {
+        opacity: 0;
+        transform: translateY(-6px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .queue-item__text {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .queue-item__time {
+      margin: 0.25rem 0 0;
+      font-size: 0.68rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .queue-item__hint {
+      margin: 0.35rem 0 0;
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+
+    .demo-banner {
+      flex-shrink: 0;
+      margin: 0 0.75rem 0;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.7rem;
+      color: var(--muted);
+      background: rgba(210, 153, 34, 0.12);
+      border: 1px solid rgba(210, 153, 34, 0.35);
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    .demo-banner[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="app-header__title">状況報告</h1>
+      <span class="status connecting" id="connStatus" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="connLabel">接続中…</span>
+      </span>
+    </header>
+
+    <p class="demo-banner" id="demoBanner" hidden>デモモード — サンプルキューを表示しています</p>
+
+    <main class="rooms-scroll" id="roomsRoot" aria-label="ルーム別キュー"></main>
+  </div>
+
+  <script>
+    (function () {
+      const ROOMS = ["A", "B", "C"];
+      const MAX_COMPLETED = 12;
+      const SWIPE_THRESHOLD = 72;
+      const SWIPE_COMPLETE_RATIO = 0.38;
+
+      const params = new URLSearchParams(location.search);
+      const demoMode = params.get("demo") === "1" || params.get("demo") === "true";
+      const wsUrl =
+        params.get("ws") ||
+        (location.protocol === "https:"
+          ? "wss://" + location.host + "/ws/reporter"
+          : "ws://" + (location.hostname || "localhost") + ":8765/ws/reporter");
+
+      const $ = (id) => document.getElementById(id);
+
+      const connStatus = $("connStatus");
+      const connLabel = $("connLabel");
+      const demoBanner = $("demoBanner");
+      const roomsRoot = $("roomsRoot");
+
+      /** @type {WebSocket | null} */
+      let socket = null;
+      let reconnectTimer = 0;
+      let demoTimer = 0;
+
+      /** @type {Record<string, { active: QueueCue[], completed: string[] }>} */
+      const roomState = Object.fromEntries(
+        ROOMS.map((r) => [r, { active: [], completed: [] }])
+      );
+
+      /** @typedef {{ id: string, text: string, time: string, isNew?: boolean }} QueueCue */
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function formatTime(d) {
+        return d.toLocaleTimeString("ja-JP", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+      }
+
+      function normalizeRoom(room) {
+        const r = String(room || "").trim().toUpperCase();
+        return ROOMS.includes(r) ? r : null;
+      }
+
+      function genId() {
+        return "c-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      }
+
+      function setConnection(state, label) {
+        connStatus.className = "status " + state;
+        connLabel.textContent = label;
+      }
+
+      function addCue(roomId, text, opts) {
+        const room = normalizeRoom(roomId);
+        if (!room || !text) return;
+        const t = String(text).trim();
+        if (!t) return;
+
+        const cue = {
+          id: (opts && opts.id) || genId(),
+          text: t,
+          time: (opts && opts.time) || formatTime(new Date()),
+          isNew: !(opts && opts.silent),
+        };
+
+        roomState[room].active.push(cue);
+        renderRoom(room);
+        if (cue.isNew) {
+          requestAnimationFrame(() => {
+            const el = roomsRoot.querySelector(`[data-cue-id="${cue.id}"]`);
+            if (el) el.classList.remove("queue-item--new");
+          });
+        }
+      }
+
+      function completeCue(roomId, cueId) {
+        const room = normalizeRoom(roomId);
+        if (!room) return;
+        const st = roomState[room];
+        const idx = st.active.findIndex((c) => c.id === cueId);
+        if (idx < 0) return;
+        const [cue] = st.active.splice(idx, 1);
+        st.completed.push(cue.text);
+        if (st.completed.length > MAX_COMPLETED) {
+          st.completed = st.completed.slice(-MAX_COMPLETED);
+        }
+        renderRoom(room);
+      }
+
+      function renderCompletedStrip(room) {
+        const st = roomState[room];
+        if (!st.completed.length) return "";
+        const chips = st.completed
+          .map((t) => `<li class="completed-chip" title="${escapeHtml(t)}">${escapeHtml(t)}</li>`)
+          .join("");
+        return (
+          `<div class="completed-strip" aria-label="完了済み">` +
+          `<p class="completed-strip__label">完了</p>` +
+          `<ul class="completed-list">${chips}</ul>` +
+          `</div>`
+        );
+      }
+
+      function renderQueueItems(room) {
+        const st = roomState[room];
+        if (!st.active.length) {
+          return `<p class="queue-empty">キューは空です</p>`;
+        }
+        return st.active
+          .map(
+            (c) =>
+              `<div class="queue-item${c.isNew ? " queue-item--new" : ""}" data-room="${room}" data-cue-id="${c.id}">` +
+              `<div class="queue-item__track">` +
+              `<span class="queue-item__done-hint" aria-hidden="true">完了</span>` +
+              `<article class="queue-item__card">` +
+              `<p class="queue-item__text">${escapeHtml(c.text)}</p>` +
+              `<p class="queue-item__time">${escapeHtml(c.time)}</p>` +
+              `<p class="queue-item__hint">右にスワイプで完了</p>` +
+              `</article>` +
+              `</div>` +
+              `</div>`
+          )
+          .join("");
+      }
+
+      function renderRoom(room) {
+        const section = roomsRoot.querySelector(`[data-room-section="${room}"]`);
+        if (!section) return;
+        const st = roomState[room];
+        const strip = section.querySelector(".completed-strip-wrap");
+        const queue = section.querySelector(".queue");
+        const countEl = section.querySelector("[data-queue-count]");
+        if (strip) strip.innerHTML = renderCompletedStrip(room);
+        if (queue) queue.innerHTML = renderQueueItems(room);
+        if (countEl) countEl.innerHTML = `待機 <strong>${st.active.length}</strong> 件`;
+        bindSwipeHandlers(section);
+      }
+
+      function renderAll() {
+        roomsRoot.innerHTML = ROOMS.map((room) => {
+          const st = roomState[room];
+          return (
+            `<section class="room-section" data-room-section="${room}" aria-label="ルーム ${room}">` +
+            `<header class="room-section__head">` +
+            `<h2 class="room-section__title">ルーム ${room}</h2>` +
+            `<span class="room-section__count" data-queue-count>待機 <strong>${st.active.length}</strong> 件</span>` +
+            `</header>` +
+            `<div class="completed-strip-wrap">${renderCompletedStrip(room)}</div>` +
+            `<div class="queue">${renderQueueItems(room)}</div>` +
+            `</section>`
+          );
+        }).join("");
+        ROOMS.forEach((r) => bindSwipeHandlers(roomsRoot.querySelector(`[data-room-section="${r}"]`)));
+      }
+
+      /** @type {WeakSet<Element>} */
+      const swipeBound = new WeakSet();
+
+      function bindSwipeHandlers(section) {
+        if (!section || swipeBound.has(section)) return;
+        swipeBound.add(section);
+
+        let drag = null;
+
+        section.addEventListener(
+          "pointerdown",
+          (e) => {
+            const item = e.target.closest(".queue-item");
+            if (!item || !section.contains(item)) return;
+            const track = item.querySelector(".queue-item__track");
+            if (!track) return;
+
+            drag = {
+              item,
+              track,
+              room: item.dataset.room,
+              cueId: item.dataset.cueId,
+              startX: e.clientX,
+              startY: e.clientY,
+              baseX: 0,
+              pointerId: e.pointerId,
+              locked: false,
+            };
+            item.classList.add("is-dragging");
+            track.style.transition = "none";
+            try {
+              item.setPointerCapture(e.pointerId);
+            } catch (_) { /* */ }
+          },
+          { passive: true }
+        );
+
+        section.addEventListener(
+          "pointermove",
+          (e) => {
+            if (!drag || e.pointerId !== drag.pointerId) return;
+            const dx = e.clientX - drag.startX;
+            const dy = e.clientY - drag.startY;
+
+            if (!drag.locked) {
+              if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+              drag.locked = Math.abs(dx) > Math.abs(dy);
+              if (!drag.locked) {
+                drag = null;
+                return;
+              }
+            }
+
+            e.preventDefault();
+            const x = Math.max(0, dx);
+            drag.track.style.transform = `translateX(${x}px)`;
+            drag.item.classList.toggle("is-threshold", x >= SWIPE_THRESHOLD);
+          },
+          { passive: false }
+        );
+
+        function endDrag(e) {
+          if (!drag || (e.pointerId !== undefined && e.pointerId !== drag.pointerId)) return;
+          const { item, track, room, cueId, startX } = drag;
+          const dx = (e.clientX ?? startX) - startX;
+          const card = item.querySelector(".queue-item__card");
+          const width = card ? card.offsetWidth : 280;
+          const shouldComplete = dx >= SWIPE_THRESHOLD || dx >= width * SWIPE_COMPLETE_RATIO;
+
+          item.classList.remove("is-dragging", "is-threshold");
+          track.style.transition = "transform 0.22s ease-out";
+
+          if (shouldComplete && dx > 20) {
+            track.style.transform = `translateX(${width}px)`;
+            track.addEventListener(
+              "transitionend",
+              () => completeCue(room, cueId),
+              { once: true }
+            );
+          } else {
+            track.style.transform = "";
+          }
+          drag = null;
+        }
+
+        section.addEventListener("pointerup", endDrag);
+        section.addEventListener("pointercancel", endDrag);
+      }
+
+      function handleServerMessage(raw) {
+        let msg;
+        try {
+          msg = typeof raw === "string" ? JSON.parse(raw) : raw;
+        } catch (_) {
+          const line = String(raw).trim();
+          if (!line) return;
+          const m = line.match(/^([ABC]):\s*(.+)$/i);
+          if (m) addCue(m[1], m[2]);
+          return;
+        }
+
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "cue" || msg.type === "queue") {
+          const room = msg.room ?? msg.roomId;
+          const text = msg.text ?? msg.message ?? msg.body;
+          if (Array.isArray(msg.items)) {
+            msg.items.forEach((t) => addCue(room, t, { id: msg.id }));
+          } else {
+            addCue(room, text, { id: msg.id, time: msg.time, silent: msg.silent });
+          }
+          return;
+        }
+
+        if (msg.type === "batch" && Array.isArray(msg.cues)) {
+          msg.cues.forEach((c) =>
+            addCue(c.room ?? c.roomId, c.text ?? c.message, {
+              id: c.id,
+              time: c.time,
+              silent: true,
+            })
+          );
+          renderAll();
+          return;
+        }
+
+        if (msg.type === "clear") {
+          const room = normalizeRoom(msg.room);
+          if (room) {
+            roomState[room].active = [];
+            if (msg.completed !== false) roomState[room].completed = [];
+            renderRoom(room);
+          } else if (msg.room === "*") {
+            ROOMS.forEach((r) => {
+              roomState[r].active = [];
+              roomState[r].completed = [];
+            });
+            renderAll();
+          }
+        }
+      }
+
+      function connect() {
+        if (demoMode) {
+          demoBanner.hidden = false;
+          setConnection("connected", "デモ");
+          startDemoFeed();
+          return;
+        }
+
+        setConnection("connecting", "接続中…");
+        try {
+          socket = new WebSocket(wsUrl);
+        } catch (e) {
+          console.error(e);
+          setConnection("error", "接続失敗");
+          scheduleReconnect();
+          return;
+        }
+
+        socket.addEventListener("open", () => {
+          setConnection("connected", "接続中");
+          demoBanner.hidden = true;
+        });
+
+        socket.addEventListener("message", (ev) => {
+          handleServerMessage(ev.data);
+        });
+
+        socket.addEventListener("close", () => {
+          setConnection("error", "切断");
+          scheduleReconnect();
+        });
+
+        socket.addEventListener("error", () => {
+          setConnection("error", "エラー");
+        });
+      }
+
+      function scheduleReconnect() {
+        if (demoMode) return;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(() => {
+          if (socket) {
+            try {
+              socket.close();
+            } catch (_) { /* */ }
+          }
+          socket = null;
+          connect();
+        }, 3000);
+      }
+
+      const DEMO_SEQUENCES = {
+        A: [
+          "ストーブ無し",
+          "右手足負傷",
+          "青色",
+          "音声500Hz",
+          "パターン：〇×○○×〇×",
+          "以上、送信要求",
+        ],
+        B: ["ストーブあり", "左手負傷", "赤色", "音声400Hz", "以上、送信要求"],
+        C: ["未報告", "歩行不可", "緑色", "音声600Hz", "パターン：×○×○×○×", "以上、送信要求"],
+      };
+
+      function startDemoFeed() {
+        const INTERVAL_MS = 900;
+        let roomIndex = 0;
+
+        function sendNextRoom() {
+          if (roomIndex >= ROOMS.length) {
+            demoTimer = 0;
+            return;
+          }
+          const room = ROOMS[roomIndex];
+          const texts = DEMO_SEQUENCES[room];
+          let i = 0;
+          demoTimer = window.setInterval(() => {
+            if (i >= texts.length) {
+              clearInterval(demoTimer);
+              demoTimer = 0;
+              roomIndex++;
+              sendNextRoom();
+            } else {
+              addCue(room, texts[i]);
+              i++;
+            }
+          }, INTERVAL_MS);
+        }
+
+        sendNextRoom();
+      }
+
+      window.ReporterApp = {
+        addCue,
+        completeCue,
+        getState: () => JSON.parse(JSON.stringify(roomState)),
+      };
+
+      renderAll();
+      connect();
+
+      window.addEventListener("beforeunload", () => {
+        clearTimeout(reconnectTimer);
+        clearInterval(demoTimer);
+        if (socket) socket.close();
+      });
+    })();
+  </script>
+</body>
+</html>

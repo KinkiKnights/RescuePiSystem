@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ログ・一時ファイル
+*.log
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# TLS 証明書（各自の環境で make_cert.py で生成）
+certs/
+
+# 動画素材（大容量のためバージョン管理外。配置場所のみ video/README.md で管理）
+video/*
+!video/README.md
+
+# 重複コピー
+"video/*コピー*"

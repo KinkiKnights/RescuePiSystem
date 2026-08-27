@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rescue-dummy",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-3.10", "main.py"],
+      "port": 8765,
+      "autoPort": false
+    }
+  ]
+}

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>レスキューロボコン — ダミーアプリ一覧</title>
+  <link rel="stylesheet" href="/static/common.css" />
+  <style>
+    .index-main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .index-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      width: min(900px, 100%);
+    }
+    .index-link {
+      display: block;
+      padding: 1.25rem 1rem;
+      text-decoration: none;
+      color: var(--text);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      text-align: center;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .index-link:hover { background: var(--surface2); }
+    .index-link small {
+      display: block;
+      margin-top: 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 400;
+      color: var(--muted);
+    }
+    .index-danger {
+      width: min(900px, 100%);
+      margin: 1.75rem auto 0;
+      padding: 1rem;
+      border: 1px dashed var(--danger);
+      border-radius: 6px;
+      text-align: center;
+    }
+    .index-danger__label {
+      display: block;
+      margin-bottom: 0.6rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .index-danger__btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+    }
+    .index-danger__btn {
+      padding: 0.85rem 1.6rem;
+      border: 2px solid var(--danger);
+      background: transparent;
+      color: var(--danger);
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .index-danger__btn:hover { background: var(--danger); color: #fff; }
+    .index-danger__btn:disabled { opacity: 0.5; cursor: default; }
+    .index-danger__result {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text);
+      white-space: pre-line;
+      text-align: left;
+      max-width: 640px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="app-header__title">レスキューロボコン ダミー操作画面</h1>
+    </header>
+    <main class="index-main">
+      <nav class="index-grid" aria-label="アプリ一覧">
+        <a class="index-link" href="/control">コントロールモード<small>操縦担当</small></a>
+        <a class="index-link" href="/analytics">アナリティクスモード<small>解析担当</small></a>
+        <a class="index-link" href="/engineer">エンジニアモード<small>監視エンジニア</small></a>
+        <a class="index-link" href="/reporter">報告者モード<small>スマホ向け</small></a>
+        <a class="index-link" href="/master">マスターモード<small>撮影進行</small></a>
+        <a class="index-link" href="/ping-monitor">Ping モニター<small>ネットワーク監視</small></a>
+        <a class="index-link" id="webrtcGridLink" href="#" target="_blank" rel="noopener">WebRTC グリッド<small>全カメラ一覧</small></a>
+        <a class="index-link" id="autoControlLink" href="#" target="_blank" rel="noopener">フィールド情報入力・監視画面（自動探索・デバッグ）<small>5号機 自律探索</small></a>
+        <a class="index-link" href="/all-monitor">4K オールモニタ<small>2×2 統合モニタ</small></a>
+        <a class="index-link" href="/control-panel">コントロールパネル<small>統合切替操作</small></a>
+      </nav>
+    </main>
+    <div class="index-danger">
+      <span class="index-danger__label">緊急操作（誤操作防止のため二段階確認）</span>
+      <div class="index-danger__btns">
+        <button type="button" class="index-danger__btn" id="rebootAllBtn">全機再起動</button>
+        <button type="button" class="index-danger__btn" id="shutdownAllBtn">全機シャットダウン</button>
+      </div>
+      <div class="index-danger__result" id="dangerResult" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('webrtcGridLink').href = location.protocol + '//' + location.hostname + ':8080/grid.html';
+    document.getElementById('autoControlLink').href = location.protocol + '//' + location.hostname + ':8092/?debug';
+
+    (function () {
+      var out = document.getElementById('dangerResult');
+      var rebootBtn = document.getElementById('rebootAllBtn');
+      var shutdownBtn = document.getElementById('shutdownAllBtn');
+      if (!out) return;
+
+      function setBusy(busy) {
+        if (rebootBtn) rebootBtn.disabled = busy;
+        if (shutdownBtn) shutdownBtn.disabled = busy;
+      }
+
+      // 二段階確認: (1) confirm ダイアログ + (2) 定型文の入力
+      function bind(btn, opts) {
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+          if (!window.confirm(opts.confirm)) return;
+          var typed = window.prompt(
+            '本当に' + opts.label + 'する場合は「' + opts.phrase + '」と入力してください。'
+          );
+          if (typed === null) return;
+          if (typed.trim() !== opts.phrase) { window.alert('入力が一致しないため中止しました。'); return; }
+          setBusy(true);
+          out.textContent = '送信中…';
+          fetch(opts.endpoint, { method: 'POST' })
+            .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+            .then(function (r) {
+              var results = (r.body && r.body.results) || {};
+              var keys = Object.keys(results).sort();
+              var lines = keys.map(function (u) {
+                var v = results[u] || {};
+                return u + '号機: ' + (v.ok ? 'OK' : 'NG') + (v.message ? '（' + v.message + '）' : '');
+              });
+              var total = (r.body && r.body.total) || keys.length;
+              var success = (r.body && typeof r.body.success === 'number') ? r.body.success : 0;
+              var head = opts.label + '結果 ' + success + '/' + total + ' 実行';
+              out.textContent = [head].concat(lines).join('\n');
+            })
+            .catch(function (err) { out.textContent = '送信に失敗しました: ' + err; })
+            .then(function () { setBusy(false); });
+        });
+      }
+
+      bind(rebootBtn, {
+        label: '全機再起動',
+        phrase: 'reboot',
+        endpoint: '/api/units/reboot_all',
+        confirm: '全5号機を再起動します。よろしいですか？\nこの操作はフリート全機を再起動します。'
+      });
+      bind(shutdownBtn, {
+        label: '全機シャットダウン',
+        phrase: 'down',
+        endpoint: '/api/units/shutdown_all',
+        confirm: '全5号機を電源OFFします。よろしいですか？\nこの操作はフリート全機をシャットダウンします。'
+      });
+    })();
+  </script>
+</body>
+</html>

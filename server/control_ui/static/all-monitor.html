@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>4K オールモニタ</title>
+  <link rel="stylesheet" href="/static/common.css" />
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    .grid2x2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      width: 100vw;
+      height: 100vh;
+      gap: 2px;
+      background: var(--border, #ffffff);
+    }
+    .cell {
+      position: relative;
+      background: var(--bg, #2a2a2e);
+      overflow: hidden;
+    }
+    .cell iframe {
+      border: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="grid2x2">
+    <div class="cell">
+      <iframe id="cellGrid" title="WebRTC グリッド" allow="autoplay"></iframe>
+    </div>
+    <div class="cell">
+      <iframe src="/ping-monitor" title="Ping モニター"></iframe>
+    </div>
+    <div class="cell">
+      <iframe src="/master" title="マスターモード"></iframe>
+    </div>
+    <div class="cell">
+      <iframe src="/control-panel" title="コントロールパネル"></iframe>
+    </div>
+  </div>
+  <script>
+    // WebRTC グリッドは 8080 の別ポートなので現在のホスト名から src を組み立てる。
+    document.getElementById('cellGrid').src =
+      location.protocol + '//' + location.hostname + ':8080/grid.html';
+  </script>
+</body>
+</html>
