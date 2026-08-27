@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebRTC Camera Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+  header { padding: 10px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 600; }
+  input { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:5px 8px; width:80px; font-size:13px; }
+  button { background: #2563eb; color: #fff; border: 0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  button.cam { background:#374151; }
+  button.cam.active { background:#1b5e20; }
+  #status { font-size: 13px; padding: 2px 10px; border-radius: 10px; background: #333; }
+  #status.live { background: #1b5e20; }
+  #status.err  { background: #7f1d1d; }
+  #stats { font-size: 12px; color: #9aa; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .sep { width:1px; height:22px; background:#444; margin:0 4px; }
+  video { width: 100%; height: calc(100vh - 52px); background: #000; object-fit: contain; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📷 WebRTC Camera</h1>
+  ID: <input id="pid" value="PI01" maxlength="6" placeholder="PI01">
+  <button id="connect">接続</button>
+  <span class="sep"></span>
+  <span>カメラ:</span>
+  <button class="cam" data-cam="1">1 カメラ</button>
+  <button class="cam" data-cam="2">2 カメラ2</button>
+  <span class="sep"></span>
+  <span id="status">未接続</span>
+  <span id="stats"></span>
+</header>
+<video id="video" autoplay playsinline muted controls></video>
+
+<script src="webrtc-camera.js"></script>
+<script>
+const video   = document.getElementById('video');
+const statusEl = document.getElementById('status');
+const statsEl  = document.getElementById('stats');
+const pidInput = document.getElementById('pid');
+const camBtns  = [...document.querySelectorAll('button.cam')];
+
+const cam = new WebRTCCamera({
+  onStatus(s) {
+    if (s === 'connected') { statusEl.textContent = '● LIVE'; statusEl.className = 'live'; }
+    else if (s === 'connecting') { statusEl.textContent = '接続中…'; statusEl.className = ''; }
+    else if (s === 'closed') { statusEl.textContent = '切断'; statusEl.className = 'err'; statsEl.textContent=''; }
+    else if (s.startsWith('error:')) { statusEl.textContent = 'エラー: ' + s.slice(6); statusEl.className = 'err'; }
+  },
+  onStats(st) {
+    statsEl.textContent = `${st.width}x${st.height}  ${st.kbps} kbps  fps:${st.fps}  jitter:${st.jitterMs ?? '-'}ms`;
+  },
+});
+
+document.getElementById('connect').onclick = () => {
+  cam.connect(video, pidInput.value.trim() || 'PI01');
+  setActiveCam(1); // 初期値1 (Pi側の既定と一致)
+};
+
+camBtns.forEach((b) => {
+  b.onclick = () => {
+    const n = Number(b.dataset.cam);
+    cam.camChange(n);
+    setActiveCam(n);
+  };
+});
+
+function setActiveCam(n) {
+  camBtns.forEach((b) => b.classList.toggle('active', Number(b.dataset.cam) === n));
+}
+
+// 起動時に自動接続 (URLに ?id=PI02 があればそれを使う)
+const qid = new URLSearchParams(location.search).get('id');
+if (qid) pidInput.value = qid;
+cam.connect(video, pidInput.value.trim());
+setActiveCam(1);
+</script>
+</body>
+</html>
