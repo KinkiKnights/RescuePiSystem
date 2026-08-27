@@ -31,8 +31,8 @@ kkrtx を再起動するたびに消えていた。`systemctl enable` してお�
 ## 2. 号機（Pi）
 
 ```bash
-# 録音デバイスの確認（USB マイクは通常 hw:1,0）
-arecord -l
+# 録音デバイスの確認（設定は Web UI から。ここは手動確認用）
+arecord -L
 
 # kk が audio グループに入っていないと録音デバイスが見えない
 sudo usermod -aG audio kk        # 反映には再ログイン
@@ -42,7 +42,7 @@ sudo apt install -y alsa-utils python3-numpy
 
 # 手で動かして確認
 python3 ~/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py \
-    --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0
+    --hub http://192.168.10.3:8770 --unit 5
 ```
 
 常駐のさせ方は 2 通りある。**どちらか一方だけにすること**
@@ -65,7 +65,7 @@ journalctl -u mic-publisher -f
 
 ```json
 {"id": 3, "name": "mic", "type": "bash", "autostart": true,
- "cmd": "python3 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0"}
+ "cmd": "python3 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5"}
 ```
 
 `programs.json` は tracked なので `git pull` で巻き戻るリスクがある。
@@ -75,11 +75,11 @@ journalctl -u mic-publisher -f
 
 | 号機 | `MIC_UNIT` | `MIC_DEVICE` | 備考 |
 |---|---|---|---|
-| kk03 | `3` | `hw:1,0` | H264 USB Camera 内蔵マイクに capture がある |
+| kk03 | `3` | `hw:CARD=Camera,DEV=0` | H264 USB Camera 内蔵マイクに capture がある |
 | kk04 | `4` | — | HD USB Camera に音声デバイスが無い。**マイクを繋ぐまで起動しない** |
 | kk05 | `5` | `hw:Device,0` | 外付け USB マイク（GeneralPlus）。Alcor カメラ側には capture PCM が無い |
 
-`MIC_DEVICE` は `arecord -l` の出力で必ず確認する。
+`MIC_DEVICE` は `arecord -L` の出力で必ず確認する。
 カード名で指定（`hw:Device,0`）しておくと、USB の挿し順で番号が変わっても追従する。
 
 ## 3. 購読側
@@ -114,7 +114,7 @@ python3 tools/mic_selftest.py
 | 症状 | 見るところ |
 |---|---|
 | 号機が offline のまま | 号機側で `journalctl -u mic-publisher -f`。`arecord` のエラーがそのままログに出る |
-| `arecord: main:830: audio open error: No such file or directory` | `MIC_DEVICE` が違う。`arecord -l` で確認 |
+| `arecord: main:830: audio open error: No such file or directory` | `MIC_DEVICE` が違う。`arecord -L` で確認 |
 | `arecord` がデバイスを 1 つも見つけない | `kk` が `audio` グループに居ない。`sudo usermod -aG audio kk` して再ログイン |
 | `409 Conflict` がログに繰り返し出る | 二重起動。systemd と master_control の両方から起動していないか確認 |
 | `rate mismatch` で `400` | 送信側とハブの `SAMPLE_RATE` 不一致。両方を揃える |

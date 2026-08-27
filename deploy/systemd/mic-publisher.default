@@ -5,8 +5,9 @@
 MIC_HUB=http://192.168.10.3:8770
 # 号機 ID。ハブ側のパスになる（5 なら http://kkrtx:8770/5 で聴ける）
 MIC_UNIT=5
-# ALSA 録音デバイス。arecord -l で確認する（USB マイクは通常 hw:1,0）
-MIC_DEVICE=hw:1,0
-# arecord の取り込みレート。16000 の整数倍。48000 が既定（numpy でリサンプル）
-# numpy を入れられない機体では 16000 にする（ALSA 側で変換される）
-MIC_CAPTURE_RATE=48000
+# 録音デバイスと取り込みレートは通常ここでは設定しない。
+# master_control の「デバイス設定」(~/.config/rescue-pi/devices.json) を
+# publisher 自身が読み、カード名 (hw:CARD=<名前>,DEV=0) で安定して開く。
+# ここで設定するとそちらが優先される（意図的に固定したいときだけ使う）。
+#MIC_DEVICE=hw:CARD=Device,DEV=0
+#MIC_CAPTURE_RATE=48000

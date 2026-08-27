@@ -17,6 +17,11 @@
 送信側は `arecord` と Python 標準ライブラリだけ、ハブは Python 標準ライブラリだけで動く。
 **GStreamer も FLAC コーデックも使わない。**
 
+> **録音デバイスの指定**は master_control の Web UI（DEVICE CONFIGURATION）で
+> 候補から選ぶ。`hw:CARD=<名前>,DEV=0` の形で記録されるので、USB の抜き差しや
+> マイク交換で番号がずれても追従する → [devices.md](devices.md)。
+> 下記の `--device` は一時的な上書き用。
+
 ## 使い方（最短）
 
 ```bash
@@ -24,7 +29,7 @@
 python3 server/mic_hub/mic_hub.py --port 8770 --outdir ~/kk_ws/logs/mic-recordings
 
 # 各号機（送信）
-python3 robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0
+python3 robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5
 
 # 購読（号機はパスで選ぶ）
 ffplay http://192.168.10.3:8770/5                      # 試し聴き

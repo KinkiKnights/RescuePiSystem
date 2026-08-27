@@ -3,7 +3,7 @@
     "id": 1,
     "name": "camera",
     "type": "bash",
-    "cmd": "PI_ID=KK05 SERVER=ws://192.168.137.1:8080/ws CAM1=\"v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec\" /home/kk/kk_ws/src/RescuePiSystem/robot/camera_publisher/publish-pi5.sh",
+    "cmd": "PI_ID=KK05 SERVER=ws://192.168.137.1:8080/ws /home/kk/kk_ws/src/RescuePiSystem/robot/camera_publisher/publish-pi5.sh",
     "autostart": true
   },
   {
@@ -17,7 +17,7 @@
     "id": 3,
     "name": "mic",
     "type": "bash",
-    "cmd": "/usr/bin/python3 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5 --device hw:1,0",
+    "cmd": "/usr/bin/python3 /home/kk/kk_ws/src/RescuePiSystem/robot/mic_publisher/mic_publisher.py --hub http://192.168.10.3:8770 --unit 5",
     "autostart": false
   }
 ]

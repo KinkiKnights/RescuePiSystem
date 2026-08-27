@@ -40,6 +40,7 @@ KinkiKnights レスキューロボットの **号機 (Raspberry Pi) と運用サ
 ```
 config/     号機・機器アドレスの単一の真実 (units.json)
 robot/      号機 Pi に載るもの  … master_control / camera_publisher / mic_publisher / ros2
+            device_config.py = カメラ/マイクのデバイス設定 (UI から候補を選ぶ)
 server/     kkrtx に載るもの    … control_ui / voice_comm / mic_hub / webrtc_relay
 deploy/     セットアップ        … robot/*.sh, server/kkrtx_setup.sh, systemd/*.service.in
 tools/      検証用              … mic_selftest.py, headless_viewer
@@ -79,6 +80,7 @@ git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git ~/kk_ws/src
 | [docs/mic-system.md](docs/mic-system.md) | マイク集約の設計と使い方 |
 | [docs/webrtc-camera.md](docs/webrtc-camera.md) | カメラ映像経路の設計と使い方 |
 | [docs/usb-wifi-dongle.md](docs/usb-wifi-dongle.md) | USB WiFi ドングル (RTL8811AU) の手順 |
+| [docs/devices.md](docs/devices.md) | カメラ / マイクのデバイス設定（候補選択・即反映・優先順） |
 | [docs/protocols/](docs/protocols/) | ワイヤ契約（mic / joy / webrtc / state / damiyan） |
 
 ## 設定
@@ -91,5 +93,13 @@ control_ui が live な経路を自動採用する。ping 監視の対象もこ�
 `PI_ID` は既定でホスト名を大文字化するので、ホスト名を `kk0N` にしておけば
 操作画面が購読する ID と自動で一致する。
 
-号機ごとの運用値（マイクのデバイス番号など）は `/etc/default/*` に置く。
-リポジトリ内の設定ファイルに書くと `git pull` で号機固有の差分が巻き戻るため。
+**カメラとマイクのデバイスは master_control の Web UI から選ぶ**
+（`http://<号機IP>/` の DEVICE CONFIGURATION）。接続されている候補が列挙され、
+選んだ内容は `~/.config/rescue-pi/devices.json` に記録される。指定は
+`/dev/v4l/by-id/...` と `hw:CARD=<名前>,DEV=0` の**安定した識別子**なので、
+USB を抜き差ししても、カメラやマイクを交換しても追従できる。「保存して即反映」で
+その場で反映される。詳細は [docs/devices.md](docs/devices.md)。
+
+号機ごとの運用値（ハブ URL・号機番号など）は `/etc/default/*` と
+`devices.json` に置く。リポジトリ内の設定ファイルに書くと `git pull` で
+号機固有の差分が巻き戻るため。

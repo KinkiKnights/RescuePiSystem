@@ -392,16 +392,52 @@ def build_source(args: argparse.Namespace) -> Source:
     return AlsaSource(args.device, args.capture_rate, args.arecord_extra)
 
 
+# ---- デバイス設定の解決（環境変数 → devices.json → 自動検出 → 既定値）--------
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    import device_config
+except Exception:
+    device_config = None       # 設定モジュールが無くても単体で動く
+
+
+def _default_device() -> str:
+    env = os.environ.get("MIC_DEVICE")
+    if env:
+        return env
+    if device_config is not None:
+        return (device_config.mic_device()
+                or device_config.autodetect_mic_device()
+                or "hw:1,0")
+    return "hw:1,0"
+
+
+def _default_capture_rate() -> int:
+    env = os.environ.get("MIC_CAPTURE_RATE")
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+    if device_config is not None:
+        return device_config.mic_capture_rate()
+    return 48000
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="号機マイクの音声を集約ハブへ push する（16kHz/mono/S16LE）")
-    ap.add_argument("--hub", required=True,
-                    help="集約ハブの URL（例 http://192.168.10.3:8770）")
-    ap.add_argument("--unit", required=True,
-                    help="号機 ID。ハブ側のパスになる（例 5 → GET /5）")
-    ap.add_argument("--device", default="hw:1,0",
-                    help="ALSA 録音デバイス（arecord -l で確認。既定 hw:1,0）")
-    ap.add_argument("--capture-rate", type=int, default=48000,
+    #   優先順: コマンドライン引数 > 環境変数 > devices.json > 既定値。
+    #   devices.json は master_control の「デバイス設定」が書く号機ごとの運用設定
+    #   (robot/device_config.py。カード名 hw:CARD=<名前>,DEV=0 で持つので
+    #    USB の抜き差しやマイク交換で番号がずれても追従する)。
+    ap.add_argument("--hub", default=os.environ.get("MIC_HUB"),
+                    help="集約ハブの URL（例 http://192.168.10.3:8770）。既定は $MIC_HUB")
+    ap.add_argument("--unit", default=os.environ.get("MIC_UNIT"),
+                    help="号機 ID。ハブ側のパスになる（例 5 → GET /5）。既定は $MIC_UNIT")
+    ap.add_argument("--device", default=_default_device(),
+                    help="ALSA 録音デバイス（arecord -L で確認）。"
+                         "既定は $MIC_DEVICE → devices.json → 自動検出 → hw:1,0")
+    ap.add_argument("--capture-rate", type=int, default=_default_capture_rate(),
                     help="arecord の取り込みレート。16000 の整数倍。"
                          "16000 なら numpy 不要（ALSA が変換）")
     ap.add_argument("--arecord-extra", default="--buffer-time=200000 --period-time=50000",
@@ -418,6 +454,10 @@ def main() -> int:
     ap.add_argument("--once", action="store_true",
                     help="切断時に再接続せず終了する（テスト用）")
     args = ap.parse_args()
+    if not args.hub:
+        ap.error("--hub か環境変数 MIC_HUB でハブの URL を指定してください")
+    if not args.unit:
+        ap.error("--unit か環境変数 MIC_UNIT で号機 ID を指定してください")
 
     def stop(_sig, _frm):
         if not _stop.is_set():

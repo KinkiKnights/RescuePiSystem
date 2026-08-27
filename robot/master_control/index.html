@@ -195,6 +195,52 @@
     .btn-import:hover { color: #c9d1d9; border-color: #8b949e; opacity: 1; }
     .cfg-msg { font-size: 0.78em; color: #8b949e; }
 
+
+    /* ── Device section ── */
+    .dev-panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .dev-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px; gap: 10px; flex-wrap: wrap;
+    }
+    .dev-title { color: #484f58; font-size: 0.75em; letter-spacing: 0.1em; }
+    .dev-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 12px;
+    }
+    .dev-box { border: 1px solid #21262d; border-radius: 5px; padding: 11px 12px; }
+    .dev-box h3 { color: #58a6ff; font-size: 0.82em; margin-bottom: 9px; letter-spacing: 0.04em; }
+    .dev-row { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+    .dev-row label { color: #8b949e; font-size: 0.72em; min-width: 62px; }
+    .dev-panel select, .dev-panel input[type="number"], .dev-panel input[type="text"] {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+      color: #c9d1d9; font-family: inherit; font-size: 0.78em;
+      padding: 5px 7px; flex: 1; min-width: 0;
+    }
+    .dev-panel select:focus, .dev-panel input:focus { outline: none; border-color: #58a6ff; }
+    .dev-panel select option { background: #161b22; }
+    .dev-resolved {
+      color: #484f58; font-size: 0.68em; word-break: break-all;
+      border-top: 1px dashed #21262d; padding-top: 7px; margin-top: 3px;
+    }
+    .dev-warn {
+      color: #d29922; font-size: 0.72em; margin-bottom: 8px;
+      border-left: 2px solid #d29922; padding-left: 7px;
+    }
+    .dev-warn.err { color: #f85149; border-left-color: #f85149; }
+    .dev-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn-scan  { color: #8b949e; border-color: #30363d; padding: 5px 11px; font-size: 0.78em; }
+    .btn-scan:hover { color: #c9d1d9; border-color: #8b949e; opacity: 1; }
+    .btn-dev-save  { color: #58a6ff; border-color: #58a6ff; padding: 5px 13px; font-size: 0.78em; }
+    .btn-dev-apply { color: #3fb950; border-color: #3fb950; padding: 5px 13px; font-size: 0.78em; }
+    .dev-msg { color: #8b949e; font-size: 0.72em; }
+
     /* ── Toast ── */
     .toast {
       position: fixed;
@@ -236,6 +282,58 @@
 
   <div class="grid" id="grid"></div>
 
+  <div class="dev-panel">
+    <div class="dev-head">
+      <div class="dev-title">DEVICE CONFIGURATION &nbsp;<span style="color:#30363d">カメラ / マイク</span></div>
+      <div class="dev-actions">
+        <button class="btn-scan" onclick="loadDevices(true)">&#8635; 再スキャン</button>
+        <button class="btn-dev-save"  onclick="saveDevices(false)">&#128190; 保存</button>
+        <button class="btn-dev-apply" onclick="saveDevices(true)">&#9889; 保存して即反映</button>
+        <span class="dev-msg" id="dev-msg"></span>
+      </div>
+    </div>
+    <div id="dev-warn"></div>
+    <div class="dev-grid">
+      <div class="dev-box">
+        <h3>&#127909; CAMERA</h3>
+        <div class="dev-row">
+          <label>入力</label>
+          <select id="cam-sel" onchange="onCamChange()"></select>
+        </div>
+        <div class="dev-row" id="cam-size-row">
+          <label>解像度</label>
+          <select id="cam-size" onchange="onCamSizeChange()"></select>
+        </div>
+        <div class="dev-row" id="cam-wh-row">
+          <label>W &times; H</label>
+          <input type="number" id="cam-w" min="160" max="4096" step="2">
+          <input type="number" id="cam-h" min="120" max="4096" step="2">
+        </div>
+        <div class="dev-row">
+          <label>FPS</label>
+          <input type="number" id="cam-fps" min="1" max="120">
+        </div>
+        <div class="dev-resolved" id="cam-resolved">--</div>
+      </div>
+      <div class="dev-box">
+        <h3>&#127908; MICROPHONE</h3>
+        <div class="dev-row">
+          <label>入力</label>
+          <select id="mic-sel"></select>
+        </div>
+        <div class="dev-row">
+          <label>取込レート</label>
+          <select id="mic-rate">
+            <option value="48000">48000 Hz (既定・numpy でリサンプル)</option>
+            <option value="32000">32000 Hz</option>
+            <option value="16000">16000 Hz (numpy 不要・ALSA が変換)</option>
+          </select>
+        </div>
+        <div class="dev-resolved" id="mic-resolved">--</div>
+      </div>
+    </div>
+  </div>
+
   <div class="sys-panel">
     <div class="sys-title">SYSTEM CONTROL</div>
     <div class="sys-actions">
@@ -275,6 +373,166 @@
   <div class="toast" id="toast"></div>
 
   <script>
+
+    /* ── デバイス設定 (カメラ / マイク) ─────────────────────────────
+       指定は安定 ID (カメラ = /dev/v4l/by-id/...、マイク = hw:CARD=<名前>,DEV=0)
+       で持ち、実際に接続されている候補から選ぶ。保存先は devices.json
+       (リポジトリ外なので git pull で消えない)。「保存して即反映」は
+       該当プログラム (camera / mic) を再起動して設定を反映する。 */
+    let devState = null;
+
+    function devMsg(text, isErr) {
+      const el = document.getElementById('dev-msg');
+      el.textContent = text || '';
+      el.style.color = isErr ? '#f85149' : '#8b949e';
+    }
+
+    async function loadDevices(rescan) {
+      try {
+        if (rescan) devMsg('スキャン中...');
+        const r = await fetch('/devices');
+        if (!r.ok) { devMsg('デバイス情報を取得できません', true); return; }
+        devState = await r.json();
+        renderDevices();
+        if (rescan) devMsg(`候補: カメラ ${devState.candidates.cameras.length} 件 / マイク ${devState.candidates.mics.length} 件`);
+      } catch (e) {
+        devMsg('デバイス情報を取得できません', true);
+      }
+    }
+
+    function camKey(c) { return c.kind === 'usb' ? `usb:${c.device}:${c.format}` : c.kind; }
+
+    function renderDevices() {
+      if (!devState || devState.error) { devMsg(devState ? devState.error : '', true); return; }
+      const cfg = devState.config, cams = devState.candidates.cameras, mics = devState.candidates.mics;
+
+      // ── 警告: 保存済みデバイスが今は繋がっていない / 未設定 ──
+      const warn = [];
+      if (devState.configured.camera && !devState.present.camera) {
+        warn.push(['err', `保存済みのカメラが見つかりません (${cfg.camera.device || cfg.camera.kind})。交換した場合は下の候補から選び直してください。`]);
+      }
+      if (devState.configured.mic && !devState.present.mic) {
+        warn.push(['err', `保存済みのマイクが見つかりません (${cfg.mic.device})。交換した場合は下の候補から選び直してください。`]);
+      }
+      if (!devState.exists) {
+        warn.push(['', '設定ファイルが未作成です。接続されているデバイスから自動検出した値で動いています。保存すると次回以降も固定されます。']);
+      }
+      if (!cams.some(c => c.kind === 'usb') ) warn.push(['', 'USB カメラが検出されていません。']);
+      if (!mics.length) warn.push(['', '録音デバイスが検出されていません。']);
+      document.getElementById('dev-warn').innerHTML = warn
+        .map(([k, t]) => `<div class="dev-warn ${k}">${escHtml(t)}</div>`).join('');
+
+      // ── カメラ候補 ──
+      const camSel = document.getElementById('cam-sel');
+      const cur = camKey(cfg.camera);
+      camSel.innerHTML = cams.map(c =>
+        `<option value="${escHtml(camKey(c))}">${escHtml(c.label)}</option>`).join('');
+      if (devState.configured.camera && !cams.some(c => camKey(c) === cur)) {
+        camSel.insertAdjacentHTML('afterbegin',
+          `<option value="${escHtml(cur)}">(未接続) ${escHtml(cfg.camera.device || cfg.camera.kind)}</option>`);
+      }
+      camSel.value = cur;
+      if (!camSel.value && cams.length) camSel.value = camKey(cams[0]);
+
+      document.getElementById('cam-w').value = cfg.camera.width;
+      document.getElementById('cam-h').value = cfg.camera.height;
+      document.getElementById('cam-fps').value = cfg.camera.framerate;
+      onCamChange(true);
+
+      // ── マイク候補 ──
+      const micSel = document.getElementById('mic-sel');
+      micSel.innerHTML = mics.map(m =>
+        `<option value="${escHtml(m.device)}">${escHtml(m.label)}</option>`).join('');
+      if (cfg.mic.device && !mics.some(m => m.device === cfg.mic.device)) {
+        micSel.insertAdjacentHTML('afterbegin',
+          `<option value="${escHtml(cfg.mic.device)}">(未接続) ${escHtml(cfg.mic.device)}</option>`);
+      }
+      micSel.value = cfg.mic.device || (mics[0] ? mics[0].device : '');
+      document.getElementById('mic-rate').value = String(cfg.mic.capture_rate);
+
+      document.getElementById('cam-resolved').textContent =
+        '起動時に渡す値: ' + (devState.resolved.camera_source || '(未解決)');
+      document.getElementById('mic-resolved').textContent =
+        '起動時に渡す値: ' + (devState.resolved.mic_device || '(未解決)') +
+        ' @ ' + devState.resolved.mic_capture_rate + ' Hz';
+    }
+
+    function selectedCam() {
+      if (!devState) return null;
+      const key = document.getElementById('cam-sel').value;
+      return devState.candidates.cameras.find(c => camKey(c) === key) || null;
+    }
+
+    /* カメラ候補が持つ解像度リストを解像度セレクトへ。USB 以外 (CSI / テスト) は
+       解像度指定が効かないので入力欄を隠す。 */
+    function onCamChange(keepSize) {
+      const c = selectedCam();
+      const sizeRow = document.getElementById('cam-size-row');
+      const whRow = document.getElementById('cam-wh-row');
+      const sizeSel = document.getElementById('cam-size');
+      const isUsb = !c || c.kind === 'usb';
+      whRow.style.display = isUsb ? '' : 'none';
+      const sizes = (c && c.sizes) || [];
+      if (isUsb && sizes.length) {
+        const w = document.getElementById('cam-w').value, h = document.getElementById('cam-h').value;
+        sizeSel.innerHTML = sizes.map(s => `<option value="${s}">${s}</option>`).join('')
+          + '<option value="">(手入力)</option>';
+        sizeSel.value = sizes.includes(`${w}x${h}`) ? `${w}x${h}` : '';
+        sizeRow.style.display = '';
+      } else {
+        sizeRow.style.display = 'none';
+      }
+      if (!keepSize && isUsb && sizes.length && sizeSel.value) onCamSizeChange();
+    }
+
+    function onCamSizeChange() {
+      const v = document.getElementById('cam-size').value;
+      if (!v) return;
+      const [w, h] = v.split('x');
+      document.getElementById('cam-w').value = w;
+      document.getElementById('cam-h').value = h;
+    }
+
+    function collectDevices() {
+      const c = selectedCam();
+      const key = document.getElementById('cam-sel').value || '';
+      const camera = c
+        ? { kind: c.kind, device: c.device, format: c.format }
+        : { kind: (devState.config.camera.kind || 'usb'),
+            device: devState.config.camera.device,
+            format: devState.config.camera.format };
+      camera.width = parseInt(document.getElementById('cam-w').value) || 1024;
+      camera.height = parseInt(document.getElementById('cam-h').value) || 768;
+      camera.framerate = parseInt(document.getElementById('cam-fps').value) || 30;
+      camera.pipeline = devState.config.camera.pipeline || '';
+      return {
+        camera,
+        mic: {
+          device: document.getElementById('mic-sel').value || '',
+          capture_rate: parseInt(document.getElementById('mic-rate').value) || 48000,
+        },
+      };
+    }
+
+    async function saveDevices(apply) {
+      if (!devState) return;
+      devMsg(apply ? '保存して反映中...' : '保存中...');
+      try {
+        const r = await fetch('/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: collectDevices(), apply: !!apply, target: 'all' }),
+        });
+        const j = await r.json();
+        toast(j.message || (j.ok ? 'OK' : 'NG'));
+        devMsg(j.ok ? '' : (j.message || '失敗'), !j.ok);
+        if (j.devices) { devState = j.devices; renderDevices(); }
+        fetchStatus();
+      } catch (e) {
+        devMsg('保存に失敗しました', true);
+      }
+    }
+
     let toastTimer;
     let lastConnectedAt = null;
 
@@ -479,6 +737,9 @@
     // ─────────────────────────────────────────────────────
 
     fetchStatus();
+
+    loadDevices(false);
+
     setInterval(fetchStatus, 5000);
   </script>
 </body>

@@ -50,7 +50,7 @@ systemd では `deploy/systemd/webrtc-relay.service.in` が絶対パスで渡す
 |---|---|---|
 | `PI_ID` | ホスト名の大文字 | シグナリングで名乗る ID |
 | `SERVER` | `ws://<relay>:8080/ws` | relay のシグナリング URL |
-| `CAM1` | `v4l2src … ! jpegdec`（USB） | カメラ 1 の GStreamer ソース。CSI は `libcamerasrc` |
+| `CAM1` | devices.json 由来（未設定なら自動検出） | カメラ 1 の GStreamer ソース。master_control が[デバイス設定](../devices.md)から解決して渡す |
 
 relay 切断時は publisher 側が自動再接続する。
 

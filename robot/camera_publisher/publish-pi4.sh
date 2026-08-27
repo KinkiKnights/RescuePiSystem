@@ -16,7 +16,9 @@ export DEFAULT_CAM="${DEFAULT_CAM:-1}"
 
 # --- 入力ソース ---
 # 1 = カメラ (CSI: libcamerasrc / USB: v4l2src)。MJPEG出力カメラは ! image/jpeg ! jpegdec を付与
-export CAM1="${CAM1:-libcamerasrc}"
+# CAM1 は指定しない: 未指定なら publish.py が devices.json
+# (master_control の「デバイス設定」) → 自動検出 の順で解決する。
+# 一時的に固定したいときだけ CAM1="..." を渡す。
 # 画面取得を使う場合のみ有効化 (X11はximagesrc / Waylandはpipewiresrc):
 #   export CAM0="ximagesrc use-damage=false"
 # 例: 2台目カメラ

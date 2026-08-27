@@ -19,6 +19,7 @@ WebRTCカメラパブリッシャ (Raspberry Pi 用 / GStreamer webrtcbin) — �
   ENCODER     : エンコード部 (既定 x264enc ... / Pi4は v4l2h264enc)
   DEFAULT_CAM : 起動時の選択番号 (既定 1)
   CAM0..CAM9  : 各番号の入力ソース部。CAM0はスクリーン、CAM1以降はカメラ。
+                未指定なら devices.json (master_control のデバイス設定) を読む。
                 (定義された番号だけが選択肢になる)
 
 通常はラッパースクリプト(publish-pi4.sh 等)経由で起動する。
@@ -61,9 +62,17 @@ ENCODER = os.environ.get(
 #   既定では画面取得(0)は無効。CAM0を設定すれば有効化される。
 #   0 = スクリーン (例: CAM0="ximagesrc use-damage=false" / Waylandは pipewiresrc)
 #   1 = カメラ (既定 /dev/video0)
-DEFAULT_SOURCES = {
-    1: "v4l2src device=/dev/video0",
-}
+# 設定の優先順: CAM* 環境変数 > devices.json > 接続機器からの自動検出。
+# devices.json は master_control の「デバイス設定」で書かれる号機ごとの運用設定
+# (robot/device_config.py。/dev/v4l/by-id の安定パスで持つ)。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    import device_config
+except Exception as _exc:  # 設定モジュールが読めなくても配信は続行する
+    device_config = None
+    print(f"[cam] device_config を読み込めませんでした({_exc})", flush=True)
+
+FALLBACK_SOURCE = "v4l2src device=/dev/video0"
 
 
 def collect_sources():
@@ -72,9 +81,16 @@ def collect_sources():
         v = os.environ.get(f"CAM{n}")
         if v:
             sources[n] = v
-    if not sources:
-        sources = dict(DEFAULT_SOURCES)
-    return sources
+    if sources:
+        return sources
+    if device_config is not None:
+        src = device_config.camera_source() or device_config.autodetect_camera_source()
+        if src:
+            where = "devices.json" if device_config.camera_source() else "自動検出"
+            print(f"[cam] source from {where}: {src}", flush=True)
+            return {1: src}
+    print(f"[cam] 設定が無いため既定を使います: {FALLBACK_SOURCE}", flush=True)
+    return {1: FALLBACK_SOURCE}
 
 
 SOURCES = collect_sources()

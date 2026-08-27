@@ -24,11 +24,14 @@ Group=@USER@
 SupplementaryGroups=audio
 
 EnvironmentFile=/etc/default/mic-publisher
+# 録音デバイスと取り込みレートは指定しない。master_control の「デバイス設定」
+# (~/.config/rescue-pi/devices.json) を publisher 自身が読む。/etc/default で
+# MIC_DEVICE / MIC_CAPTURE_RATE を設定した場合はそちらが優先される。
+Environment=HOME=@HOME@
+Environment=RESCUE_DEVICES_CONFIG=@HOME@/.config/rescue-pi/devices.json
 ExecStart=/usr/bin/python3 @REPO_DIR@/robot/mic_publisher/mic_publisher.py \
     --hub ${MIC_HUB} \
-    --unit ${MIC_UNIT} \
-    --device ${MIC_DEVICE} \
-    --capture-rate ${MIC_CAPTURE_RATE}
+    --unit ${MIC_UNIT}
 
 # publisher 自身もハブ断で再接続し続けるが、arecord ごと作り直したい種類の
 # 異常（デバイスの抜き差しなど）に備えて systemd 側でも必ず起こし直す。

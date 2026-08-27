@@ -24,8 +24,13 @@
    **号機 ID は `KK0N` に統一**（`units[n].pi_id` / camera_publisher の `PI_ID` /
    操作画面が購読する ID / relay の `/pis` がすべて同じ文字列になる）。
    `RES0N` や `PI0N` といった別系統の ID を新たに作らない。
-6. **号機ごとの運用値は `/etc/default/*`。** リポジトリ内の設定ファイルに書くと
-   `git pull` で差分が巻き戻る（`programs.json` で実際に起きた）。
+6. **号機ごとの運用値は `/etc/default/*` か `devices.json`。** リポジトリ内の
+   設定ファイルに書くと `git pull` で差分が巻き戻る（`programs.json` で実際に起きた）。
+7. **カメラ / マイクのデバイス指定を `programs.json` の `cmd` に埋め込まない。**
+   `robot/device_config.py` の設定（`~/.config/rescue-pi/devices.json`）が持ち、
+   master_control が環境変数として渡す。デバイスは番号（`/dev/video0`,
+   `hw:1,0`）ではなく**安定 ID**（`/dev/v4l/by-id/...`, `hw:CARD=<名前>,DEV=0`）で
+   参照する。UI からは必ず「実際に接続されている候補」を選ばせる（→ `docs/devices.md`）。
 
 ## 変更するときの目印
 
@@ -38,5 +43,6 @@
 ```bash
 python3 tools/mic_selftest.py                       # mic 系（実機なしで通る）
 python3 -c "import sys;sys.path.insert(0,'server/control_ui');import main"   # 設定読み込み
+python3 robot/device_config.py --list               # カメラ/マイクの候補列挙
 bash -n deploy/robot/*.sh deploy/server/*.sh        # スクリプトの構文
 ```

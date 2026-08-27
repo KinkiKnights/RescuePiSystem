@@ -1,5 +1,10 @@
 # カメラ映像の低遅延 WebRTC 配信 (camera_publisher + webrtc_relay)
 
+> **カメラの指定**は master_control の Web UI（DEVICE CONFIGURATION）で候補から
+> 選ぶ。`/dev/v4l/by-id/...` の安定パスで記録されるので、USB の抜き差しや
+> カメラ交換で `/dev/videoN` の番号がずれても追従する → [devices.md](devices.md)。
+> 下記の `CAM1` などの環境変数は一時的な上書き用。
+
 複数のRaspberry Pi (Ubuntu 24.04, Pi 4/5想定) に接続したカメラ映像を、
 **高性能な中継サーバー(SFU)経由でブラウザへWebRTC配信**するシステム。
 低遅延・低CPU負荷を重視し、可能な範囲でハードウェアアクセラレーションを活用する。

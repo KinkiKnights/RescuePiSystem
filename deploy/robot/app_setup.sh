@@ -16,6 +16,8 @@
 #  Pi 上で動くプログラムは RescuePiSystem リポジトリに集約されています:
 #    - master_control/     : Web UI つきプログラム起動管理サーバ (port 80)
 #    - camera_publisher/   : USB カメラ → WebRTC 配信 (relay へ)
+#         カメラ/マイクのデバイス指定は master_control の「デバイス設定」
+#         (~/.config/rescue-pi/devices.json) が持つ
 #    - mic_publisher/      : USB マイク → 16kHz PCM を集約ハブへ HTTP push
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
 #
@@ -35,17 +37,14 @@ set -euo pipefail
 : "${RELAY_HOST:=192.168.137.1}"                           # webrtc 中継(SFU)サーバのIP
 : "${RELAY_URL:=ws://${RELAY_HOST}:8080/ws}"
 : "${PI_ID:=$(hostname | tr '[:lower:]' '[:upper:]')}"     # 配信ID(ホスト名から自動生成)
-# カメラ入力ソース (camChange の番号1)。
-#   USBカメラ(MJPEG出力)の例: "v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec"
-#   CSIカメラの場合は         : "libcamerasrc"
-: "${CAM1_SRC:=v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec}"
+# カメラ/マイクのデバイスは devices.json (master_control の「デバイス設定」)が持つ。
+#   ここでは初期値を自動検出するだけで、programs.json には埋め込まない。
+#   手動で固定したい場合は setup 後に UI から選ぶか devices.json を編集する。
 # マイク配信 (mic_publisher: 16kHz/mono/S16LE を集約ハブへ HTTP push)
-: "${MIC_ALSA_DEV:=hw:1,0}"                    # USBマイク (arecord -l で確認)
 : "${HUB_HOST:=192.168.10.3}"                  # 集約ハブ(kkrtx)のIP
 : "${MIC_HUB:=http://${HUB_HOST}:8770}"
 : "${MIC_UNIT:=$(hostname | grep -oE '[0-9]+$' | sed 's/^0*//' || true)}"   # kk05 -> 5
 : "${MIC_UNIT:=$(hostname)}"
-: "${MIC_CAPTURE_RATE:=48000}"                 # 16000 なら numpy 不要 (ALSA が変換)
 : "${USER_NAME:=$(id -un)}"
 # CAN (MCP2515 SPI HAT) bring-up。HAT を装着した号機のみ 1(既定は無効)。
 : "${SETUP_CAN:=0}"
@@ -139,12 +138,19 @@ fi
 # 4. master control: カメラ/joy_node_web/mic を登録 + 自動起動(systemd)
 #    systemd ユニットはこのスクリプトだけが生成します(重複定義を持たない)。
 # =============================================================================
+# カメラ/マイクのデバイス指定は cmd に埋め込まない。master_control が
+# devices.json (robot/device_config.py) から解決して環境変数で渡す。
+# 号機ごとの運用設定なのでリポジトリ外 (~/.config/rescue-pi/devices.json) に置く。
+log "4-0. カメラ / マイクのデバイス設定を初期化 (未作成なら自動検出)"
+python3 "${REPO_DIR}/robot/device_config.py" --init || log "   (デバイス設定の初期化に失敗。UI から設定してください)"
+python3 "${REPO_DIR}/robot/device_config.py" || true
+
 log "4-1. programs.json にカメラ / joy_node_web / mic を登録"
 cat > "${REPO_DIR}/robot/master_control/programs.json" <<JSON
 [
-  {"id": 1, "name": "camera",       "type": "bash", "cmd": "PI_ID=${PI_ID} SERVER=${RELAY_URL} CAM1=\"${CAM1_SRC}\" ${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh"},
+  {"id": 1, "name": "camera",       "type": "bash", "cmd": "PI_ID=${PI_ID} SERVER=${RELAY_URL} ${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh"},
   {"id": 2, "name": "joy_node_web", "type": "ros2", "cmd": "source ${WS}/install/setup.bash && ros2 run joy_node_web joy_node"},
-  {"id": 3, "name": "mic",          "type": "bash", "cmd": "/usr/bin/python3 ${REPO_DIR}/robot/mic_publisher/mic_publisher.py --hub ${MIC_HUB} --unit ${MIC_UNIT} --device ${MIC_ALSA_DEV} --capture-rate ${MIC_CAPTURE_RATE}"}
+  {"id": 3, "name": "mic",          "type": "bash", "cmd": "/usr/bin/python3 ${REPO_DIR}/robot/mic_publisher/mic_publisher.py --hub ${MIC_HUB} --unit ${MIC_UNIT}"}
 ]
 JSON
 
@@ -170,8 +176,12 @@ if [ "${MIC_SERVICE:-0}" = "1" ]; then
 # /etc/default/mic-publisher — 号機ごとの設定 (app_setup.sh が初回生成)
 MIC_HUB=${MIC_HUB}
 MIC_UNIT=${MIC_UNIT}
-MIC_DEVICE=${MIC_ALSA_DEV}
-MIC_CAPTURE_RATE=${MIC_CAPTURE_RATE}
+# 録音デバイスと取り込みレートは master_control の「デバイス設定」
+# (~/.config/rescue-pi/devices.json) が持つ。ここで MIC_DEVICE /
+# MIC_CAPTURE_RATE を設定すると UI の設定より優先されるので、
+# 意図的に固定したいときだけコメントを外す。
+#MIC_DEVICE=hw:CARD=Device,DEV=0
+#MIC_CAPTURE_RATE=48000
 DEF
   fi
   install_unit mic-publisher
@@ -193,12 +203,13 @@ set +u; source "/opt/ros/${ROS_DISTRO}/setup.bash" 2>/dev/null || true; source "
 ros2 pkg executables joy_node_web 2>/dev/null | grep -q joy_node && echo "   [OK] joy_node_web ビルド済み" || echo "   [NG] joy_node_web 未ビルド"
 ls "${REPO_DIR}/robot/camera_publisher/publish-${PI_MODEL}.sh" >/dev/null 2>&1 && echo "   [OK] camera publisher 配置済み" || echo "   [NG] camera publisher なし"
 ls "${REPO_DIR}/robot/mic_publisher/mic_publisher.py" >/dev/null 2>&1 && echo "   [OK] mic publisher 配置済み" || echo "   [NG] mic publisher なし"
+python3 "${REPO_DIR}/robot/device_config.py" >/dev/null 2>&1 && echo "   [OK] デバイス設定を解決できる" || echo "   [NG] デバイス設定の解決に失敗"
 
 log "=== RescuePiSystem の環境構築が完了しました ==="
 echo "  - master control:  http://<このPiのIP>/        (port 80, 自動起動済み)"
 echo "  - joy_node_web:    http://<このPiのIP>:8700/joy (master control から起動)"
 echo "  - camera:          PI_ID=${PI_ID}  RELAY=${RELAY_URL}"
-echo "  - mic:             ${MIC_HUB}/ingest/${MIC_UNIT} へ push (dev=${MIC_ALSA_DEV})"
+echo "  - mic:             ${MIC_HUB}/ingest/${MIC_UNIT} へ push"
 echo "                     購読は ${MIC_HUB}/${MIC_UNIT}"
 echo "  - カメラ/joy/micは master control の Web UI から起動します(自動起動はしません)。"
 echo "  - 反映には再ログイン、または 'source ~/.bashrc' を実行してください。"

@@ -16,12 +16,22 @@ publisher と relay は WebSocket シグナリング(`ws://<relay>:8080/ws`)で�
 publisher / relay / クライアント JS はすべて本リポジトリにあります。
 **片側だけ変えず、同じコミットで 3 者を揃えてください。**
 
+## カメラの指定
+
+カメラは **master_control の Web UI(DEVICE CONFIGURATION)で候補から選ぶ**。
+選択内容は `~/.config/rescue-pi/devices.json` に記録され、`publish.py` が
+起動時に読む(`/dev/v4l/by-id/...` の安定パスなので USB の抜き差しやカメラ交換に
+追従する)。詳細は [docs/devices.md](../../docs/devices.md)。
+
+一時的に上書きしたいときだけ `CAM1="..."` を環境変数で渡す
+(優先順: `CAM*` 環境変数 > devices.json > 自動検出)。
+
 ## 起動
 
 master_control の programs.json から起動されます:
 
 ```bash
-PI_ID=KK05 SERVER=ws://192.168.137.1:8080/ws CAM1="v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec" ./publish-pi5.sh
+PI_ID=KK05 SERVER=ws://192.168.137.1:8080/ws ./publish-pi5.sh
 ```
 
 - `publish-pi5.sh` — Raspberry Pi 5 用(ソフトウェアエンコード)

@@ -32,6 +32,9 @@ fi
 # =============================================================================
 # 1. RescuePiSystem 本体と submodule (joy_node_web) を更新
 # =============================================================================
+log "0. カメラ / マイクのデバイス設定を確認(未作成なら自動検出して作成)"
+python3 "${REPO_DIR}/robot/device_config.py" --init || log "   (初期化に失敗。Web UI から設定してください)"
+
 log "1. RescuePiSystem を pull(現在のブランチを追従)"
 BRANCH="$(git -C "${REPO_DIR}" rev-parse --abbrev-ref HEAD)"
 git -C "${REPO_DIR}" pull --ff-only origin "${BRANCH}"

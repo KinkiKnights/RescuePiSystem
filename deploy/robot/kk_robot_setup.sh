@@ -54,12 +54,10 @@ export PI_MODEL="pi5"                                     # publish-${PI_MODEL}.
 export RELAY_HOST="${RELAY_HOST:-192.168.137.1}"          # webrtc 中継(SFU)サーバのIP
 export RELAY_URL="ws://${RELAY_HOST}:8080/ws"
 export PI_ID="${PI_ID:-$(hostname | tr '[:lower:]' '[:upper:]')}"    # 配信ID(ホスト名から自動生成)
-# カメラ入力ソース (camChange の番号1)。
-#   USBカメラ(MJPEG出力)の例: "v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec"
-#   CSIカメラの場合は         : "libcamerasrc"
-export CAM1_SRC="${CAM1_SRC:-v4l2src device=/dev/video0 ! image/jpeg,width=1024,height=768,framerate=30/1 ! jpegdec}"
+# カメラ / マイクのデバイス指定はここでは持たない。
+#   master_control の「デバイス設定」(~/.config/rescue-pi/devices.json) が持ち、
+#   セットアップ時は接続機器から自動検出する → docs/devices.md
 # マイク配信 (mic_publisher: 16kHz/mono/S16LE を集約ハブへ HTTP push)
-export MIC_ALSA_DEV="${MIC_ALSA_DEV:-hw:1,0}"   # USBマイク (arecord -l で確認)
 export HUB_HOST="${HUB_HOST:-192.168.10.3}"     # 集約ハブ(kkrtx)のIP
 export MIC_HUB="${MIC_HUB:-http://${HUB_HOST}:8770}"
 # 号機ID(ハブ側のパスになる)。ホスト名末尾の数字から自動生成 (kk05 -> 5)。

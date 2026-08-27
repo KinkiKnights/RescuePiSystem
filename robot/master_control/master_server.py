@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -13,9 +14,15 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import psutil
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# カメラ / マイクのデバイス設定 (robot/device_config.py)。プログラム起動時に
+# 環境変数として注入し、Web UI からは候補を選んで保存できるようにする。
+sys.path.insert(0, os.path.dirname(BASE_DIR))
+import device_config  # noqa: E402
 PROGRAMS_FILE = os.path.join(BASE_DIR, 'programs.json')
 INDEX_FILE    = os.path.join(BASE_DIR, 'index.html')
-PORT = 80
+# 既定は 80 (systemd ユニットが CAP_NET_BIND_SERVICE を付ける)。検証時は
+# MASTER_CONTROL_PORT で非特権ポートに変えられる。
+PORT = int(os.environ.get('MASTER_CONTROL_PORT') or 80)
 
 
 def _terminate_tree(proc, grace=5.0):
@@ -111,7 +118,7 @@ class ProcessManager:
                 return False, f"#{prog_id} is already running"
             try:
                 kwargs = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              start_new_session=True)
+                              start_new_session=True, env=self._child_env())
                 if prog['type'] == 'ros2':
                     cmd = f'source /opt/ros/jazzy/setup.bash && {prog["cmd"]}'
                     proc = subprocess.Popen(cmd, shell=True, executable='/bin/bash', **kwargs)
@@ -214,6 +221,32 @@ class ProcessManager:
         ]
 
     @staticmethod
+    def _child_env():
+        """子プロセスへ渡す環境変数 (デバイス設定を注入する)。
+
+        カメラ/マイクの指定を programs.json の cmd 文字列に埋め込む代わりに、
+        devices.json から解決した値をここで環境変数として渡す。publisher 側は
+        引数 > 環境変数 > devices.json の順で解決するので、cmd で明示した値が
+        あればそちらが優先される。
+        """
+        env = dict(os.environ)
+        try:
+            env.update(device_config.program_env())
+        except Exception as exc:
+            print(f"[devices] 設定を解決できませんでした({exc})。既定で起動します。",
+                  flush=True)
+        return env
+
+    def find_by_name(self, name):
+        """名前でプログラムを引く (デバイス設定の即反映で camera / mic を特定する)。"""
+        with self._lock:
+            for prog in sorted(self.programs.values(), key=lambda p: p['id']):
+                if prog.get('name') == name:
+                    return {'id': prog['id'],
+                            'running': self._running(prog)}
+        return None
+
+    @staticmethod
     def _running(prog):
         return prog['process'] is not None and prog['process'].poll() is None
 
@@ -260,6 +293,8 @@ class APIHandler(BaseHTTPRequestHandler):
             })
         elif path == '/programs/config':
             self._json(self.pm.get_config())
+        elif path == '/devices':
+            self._json(self._devices_payload())
         else:
             self._not_found()
 
@@ -293,6 +328,36 @@ class APIHandler(BaseHTTPRequestHandler):
             ok, msg = self.pm.set_autostart(prog_id, enabled)
             self._json({'ok': ok, 'message': msg})
 
+        elif parts == ['devices']:
+            # 設定を保存する。{"apply": true} なら保存後に該当プログラムを再起動。
+            body = self._read_json()
+            if body is None:
+                return
+            try:
+                cfg = device_config.validate(body.get('config', body))
+                path = device_config.save(cfg)
+            except ValueError as e:
+                self._json({'ok': False, 'message': f'設定が不正です: {e}'})
+                return
+            except OSError as e:
+                self._json({'ok': False, 'message': f'保存できませんでした: {e}'})
+                return
+            msg = f'デバイス設定を保存しました ({path})'
+            if body.get('apply'):
+                ok, amsg = self._apply_devices(body.get('target', 'all'))
+                self._json({'ok': ok, 'message': f'{msg} / {amsg}',
+                            'devices': self._devices_payload()})
+            else:
+                self._json({'ok': True, 'message': f'{msg}。反映は「即反映」または再起動で',
+                            'devices': self._devices_payload()})
+
+        elif parts == ['devices', 'apply']:
+            body = self._read_json() if self.headers.get('Content-Length') else {}
+            if body is None:
+                return
+            ok, msg = self._apply_devices((body or {}).get('target', 'all'))
+            self._json({'ok': ok, 'message': msg, 'devices': self._devices_payload()})
+
         elif parts == ['system', 'reboot']:
             self._json({'ok': True, 'message': 'Rebooting...'})
             threading.Timer(1.0, lambda: os.system('sudo reboot')).start()
@@ -303,6 +368,46 @@ class APIHandler(BaseHTTPRequestHandler):
 
         else:
             self._not_found()
+
+    # ── デバイス設定 ─────────────────────────────────────
+    def _read_json(self):
+        """リクエストボディを JSON として読む。失敗時は応答を返して None。"""
+        length = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(length) if length else b'{}'
+        try:
+            return json.loads(raw or b'{}')
+        except Exception as e:
+            self._json({'ok': False, 'message': f'JSON を解釈できません: {e}'})
+            return None
+
+    def _devices_payload(self):
+        """UI 用: 設定・候補・解決結果・デバイス存在確認 + 対象プログラムの状態。"""
+        try:
+            st = device_config.status()
+        except Exception as e:
+            return {'error': str(e)}
+        st['programs'] = {name: self.pm.find_by_name(name) for name in ('camera', 'mic')}
+        return st
+
+    def _apply_devices(self, target):
+        """設定を即反映する。該当プログラムを再起動 (停止中なら起動) する。"""
+        targets = ('camera', 'mic') if target not in ('camera', 'mic') else (target,)
+        done, missing = [], []
+        for name in targets:
+            info = self.pm.find_by_name(name)
+            if not info:
+                missing.append(name)
+                continue
+            if info['running']:
+                ok, _ = self.pm.restart(info['id'])
+                done.append(f'{name} を再起動' if ok else f'{name} の再起動に失敗')
+            else:
+                ok, _ = self.pm.start(info['id'])
+                done.append(f'{name} を起動' if ok else f'{name} の起動に失敗')
+        msg = '、'.join(done) if done else '対象プログラムがありません'
+        if missing:
+            msg += f" (programs.json に {'/'.join(missing)} がありません)"
+        return (not any('失敗' in d for d in done)) and bool(done), msg
 
     # ── PUT ──────────────────────────────────────────────
     def do_PUT(self):

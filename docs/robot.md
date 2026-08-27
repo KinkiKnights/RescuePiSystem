@@ -76,7 +76,9 @@ joy_node_web(submodule)を取得してください(セットアップスクリ�
 ```
 </details>
 
-セットアップ後、`http://<PiのIP>/` の Web UI から camera / joy_node_web / mic を起動できます。
+セットアップ後、`http://<PiのIP>/` の Web UI から camera / joy_node_web / mic を
+起動できます。同じ画面の **DEVICE CONFIGURATION** でカメラとマイクを
+（接続されている候補から）選べます → [devices.md](devices.md)。
 
 ## 構成
 
@@ -90,7 +92,7 @@ RescuePiSystem/
 │   ├── master_server.py #   Web UI から programs.json のプログラムを起動/停止
 │   └── programs.json    #   このPi固有の登録内容 (セットアップスクリプトが生成)
 ├── camera_publisher/    # USB カメラ → WebRTC 配信 (外部 relay へ)
-├── mic_publisher/       # USB マイク → FLAC ロスレス TCP 配信 (:5005)
+├── mic_publisher/       # USB マイク → 16kHz PCM を集約ハブへ push
 ├── ros2/
 │   ├── joy_node_web/    # [submodule] Web ゲームパッド → sensor_msgs/Joy (colcon 対象, :8700/joy)
 │   └── kk_can_bringup/  # MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
