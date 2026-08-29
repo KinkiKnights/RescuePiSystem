@@ -15,8 +15,11 @@
    WebRTC (publisher ⇔ relay ⇔ ブラウザ)、joy (control_ui ⇔ joy_node_web)、
    master_control API (control_ui ⇔ 号機) はすべて同一リポジトリ内にある。
    契約は `docs/protocols/` に書く。
-3. **外部にあるのは 3 つだけ**: `joy_node_web`(submodule)、`ros2_socketcan`(`.repos` 参照)、
+3. **外部にあるのは 4 つだけ**: `joy_node_web` / `ros2_socketcan` / `gm6020_control`
+   (いずれも `robot/ros2/` 配下の **submodule**。固定コミット参照)と
    `damiyan-signal-processing`(契約は `docs/protocols/damiyan.md`)。増やさない。
+   外部の ROS 2 パッケージは**ベンダリング(ファイルの直接コピー)をしない**。
+   上流 OSS も含めて submodule にし、どの版を積んでいるかを gitlink の SHA で示す。
 4. **systemd ユニットは `deploy/systemd/*.service.in` が単一の真実。**
    実 `.service` はコミットせず、`install_unit`（`deploy/systemd/install_unit.sh`）で
    展開・設置する。スクリプト内にユニット本文を書き写さない。

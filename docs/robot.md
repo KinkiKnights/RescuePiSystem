@@ -82,9 +82,11 @@ joy_node_web(submodule)を取得してください(セットアップスクリ�
 
 ## 構成
 
-Pi 上で動くプログラムを本リポジトリに集約します。joy_node_web は他ロボットでも
-使う共有パッケージのため **submodule**(固定コミットへの参照)として含みます。
-外部 OSS の ros2_socketcan のみ `deploy/robot/rescue_pi_system.repos` で参照します。
+Pi 上で動くプログラムを本リポジトリに集約します。他ロボットや上流 OSS と共有する
+ROS 2 パッケージ(`joy_node_web` / `ros2_socketcan` / `gm6020_control`)は
+`robot/ros2/` 配下に **submodule**(固定コミットへの参照)として含みます。
+ファイルを直接コピーする「ベンダリング」はしません — どの版を積んでいるかが
+gitlink の SHA で明示され、上流への追従が切れないためです。
 
 ```
 RescuePiSystem/
@@ -95,17 +97,20 @@ RescuePiSystem/
 ├── mic_publisher/       # USB マイク → 16kHz PCM を集約ハブへ push
 ├── ros2/
 │   ├── joy_node_web/    # [submodule] Web ゲームパッド → sensor_msgs/Joy (colcon 対象, :8700/joy)
-│   └── kk_can_bringup/  # MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
+│   ├── kk_can_bringup/  # MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
+│   ├── ros2_socketcan/  # [submodule] 上流 OSS。SocketCAN ⇔ ROS 2 ブリッジ (colcon 対象)
+│   │                    #   ros2_socketcan / ros2_socketcan_msgs の 2 パッケージ
+│   └── gm6020_control/  # [submodule] GM6020 サーボ制御 (colcon 対象)
+│                        #   ▲ 実モータを駆動する。下の「GM6020 モータ制御」を読むこと
 └── setup/
     ├── kk_robot_setup.sh      # オーケストレーター (環境変数定義 / SSH キー登録待ち / 実行メニュー)
     ├── env_setup.sh           # 基本設定 (sudo/swap/WiFi) と ROS 2 の導入
     ├── app_setup.sh           # RescuePiSystem の環境構築 (依存/clone/build/systemd 生成)
     ├── can_setup.sh           # CAN (MCP2515 HAT) のシステム側 bring-up (SETUP_CAN=1 で有効)
-    ├── update.sh              # RescuePiSystem を最新に更新して再ビルド
-    └── RescuePiSystem.repos   # 外部依存 (ros2_socketcan) の vcstool 定義
+    └── update.sh              # RescuePiSystem を最新に更新して再ビルド
 
-# .repos で ~/kk_ws/src に別途 clone される (colcon ビルド対象):
-#   ros2_socketcan/   CAN 通信
+# colcon ビルド対象はすべて RescuePiSystem のツリー内にある。
+# ~/kk_ws/src に外部リポジトリを別途 clone しない (同名パッケージが二重になる)。
 ```
 
 ### システム全体像
@@ -116,6 +121,7 @@ RescuePiSystem/
   camera_publisher ──WebRTC──────────→ relay SFU (:8080) → web ビューア
   mic_publisher (:5005) ──FLAC/TCP──→ mic_receiver
   joy_node_web (:8700) ← ブラウザ操作 → /joy → ros2_socketcan → CAN
+  gm6020_control ──────────────────────── raw SocketCAN ──────→ CAN (GM6020)
 ```
 
 ## 外部リポジトリとの関係(メンテナンス方針)
@@ -127,10 +133,39 @@ RescuePiSystem/
 |---|---|
 | master_control / camera_publisher / mic_publisher / mic_hub / control_ui / webrtc_relay | **このリポジトリ** |
 | joy_node_web | [KinkiKnights/joy_node_web](https://github.com/KinkiKnights/joy_node_web)(他ロボットでも使う共有パッケージ。**submodule** として固定コミットで参照) |
-| ros2_socketcan | [autowarefoundation/ros2_socketcan](https://github.com/autowarefoundation/ros2_socketcan)(上流 OSS。取り込まず `.repos` で参照) |
+| ros2_socketcan | [autowarefoundation/ros2_socketcan](https://github.com/autowarefoundation/ros2_socketcan)(上流 OSS。**submodule** として固定コミットで参照。KinkiKnights の管理下でないため URL は `https://`) |
+| gm6020_control | [KinkiKnights/gm6020_control](https://github.com/KinkiKnights/gm6020_control)(GM6020 サーボ制御。**submodule** として固定コミットで参照。**private** のため URL は `git@`) |
 | damiyan-signal-processing | 別リポジトリ(音声解析。契約は [protocols/damiyan.md](protocols/damiyan.md) に明文化) |
 
-### joy_node_web(submodule)の運用
+### submodule の運用
+
+`robot/ros2/` 配下の 3 件が submodule です。
+
+| パス | URL | 公開 |
+|---|---|---|
+| `robot/ros2/joy_node_web` | `https://github.com/KinkiKnights/joy_node_web.git` | public |
+| `robot/ros2/ros2_socketcan` | `https://github.com/autowarefoundation/ros2_socketcan.git` | public(外部 OSS) |
+| `robot/ros2/gm6020_control` | `git@github.com:KinkiKnights/gm6020_control.git` | **private**(SSH キー必須) |
+
+固定しているコミットは `git ls-files -s robot/ros2` で確認できます。
+`ros2_socketcan` だけ `https://` なのは、KinkiKnights の管理下にない外部 public
+リポジトリなので、SSH キーが無い環境でも `--recursive` clone できるようにするためです。
+
+```bash
+# clone 時に --recursive を付け忘れた場合(3 件まとめて取得)
+git submodule update --init --recursive
+
+# 上流の最新を取り込み、親リポジトリのポインタを更新する(1 件ずつ意識的に)
+git submodule update --remote robot/ros2/ros2_socketcan
+cd ~/kk_ws && colcon build --base-paths src --symlink-install   # 先に通ることを確認
+cd ~/kk_ws/src/RescuePiSystem
+git add robot/ros2/ros2_socketcan && git commit -m "ros2_socketcan submodule を更新"
+```
+
+上流 OSS(`ros2_socketcan`)は**意図的に固定コミットへ留め置きます**。号機で動作確認
+済みの版を全機で揃えるためで、`main` の最新へ自動追従はしません。
+
+#### joy_node_web の運用
 
 joy_node_web は他ロボットでも使う共有パッケージのため、単一の真実は
 [KinkiKnights/joy_node_web](https://github.com/KinkiKnights/joy_node_web) に置き、本リポジトリは
@@ -164,10 +199,12 @@ cd ../.. && git add robot/ros2/joy_node_web && git commit -m "Bump joy_node_web 
 
 ### 外部依存の更新
 
-```bash
-vcs pull ~/kk_ws/src          # ros2_socketcan を上流に追従
-cd ~/kk_ws && colcon build
-```
+外部依存も submodule なので、更新は上の「submodule の運用」と同じ手順です。
+以前は `deploy/robot/rescue_pi_system.repos`(vcstool)で `~/kk_ws/src` へ別途
+clone していましたが、**同名パッケージが `~/kk_ws/src` に二重に現れて
+`colcon build` が壊れる**ため廃止しました。`~/kk_ws/src` 直下に
+`ros2_socketcan/` や `gm6020_control/` が残っている号機では、それらを退避してから
+ビルドし直してください(`colcon list --base-paths src` で重複を確認できます)。
 
 ## 運用メモ
 
@@ -189,8 +226,8 @@ cd ~/kk_ws && colcon build
 
 - **ROS パッケージ** `robot/ros2/kk_can_bringup`(colcon 対象)が ros2_socketcan の
   `socket_can_bridge.launch.xml`(`enable_can_fd=false`)を include します。
-  `ros2_socketcan` 本体は `deploy/robot/rescue_pi_system.repos` 経由で取得・ビルドされます
-  (取り込まず上流参照)。
+  `ros2_socketcan` 本体は submodule `robot/ros2/ros2_socketcan`(固定コミット)として
+  同梱され、同じ colcon ビルドで作られます。
 - **システム側 bring-up** は `deploy/robot/can_setup.sh` が担当:Device Tree overlay の追記、
   `/etc/default/kk-can` の生成、`/usr/local/sbin/can0-up.sh`(SocketCAN link up)と
   `/usr/local/sbin/kk-can-ros-launch.sh`(ブリッジ起動)の設置、systemd ユニット
@@ -239,3 +276,52 @@ systemctl status can0-setup kk-can-ros
 ros2 topic list                                    # /from_can_bus /to_can_bus
 candump can0                                        # フレーム受信を確認 (can-utils)
 ```
+
+## GM6020 モータ制御 (gm6020_control)
+
+> **⚠ 実アクチュエータを駆動します。** `gm6020_control` のノードを起動して `~/enable` に
+> `true` を publish すると、**その瞬間から実機の GM6020 が回ります**。机上での
+> 「とりあえず起動して確認」をしてよいパッケージではありません。周囲の安全を確保し、
+> 可動範囲に人・ケーブル・工具が無いことを確認してから通電してください。
+
+`robot/ros2/gm6020_control` は submodule([KinkiKnights/gm6020_control](https://github.com/KinkiKnights/gm6020_control)、
+private)で、DJI GM6020 のクローズドループ・サーボ(位置)制御と開ループ電圧制御を行います。
+
+### CAN 経路が kk_can_bringup と違う
+
+`kk_can_bringup` / `ros2_socketcan` の `/to_can_bus`・`/from_can_bus` は**使いません**。
+`gm6020_control` は Python 標準ライブラリの raw SocketCAN で `can0` を直接読み書きします。
+ros2_socketcan ブリッジでは GM6020 の約 1 kHz フィードバックを取りこぼし、サーボループが
+成立しないためです。したがって `kk-can-ros.service`(ブリッジ)とは**同じ `can0` を
+共有する独立した利用者**になります。
+
+### 安全柵と起動方法
+
+- **`config/gm6020_dual.yaml` の `start_enabled: false` が安全柵**です。起動直後は出力 0 で、
+  `~/enable` に `true` を publish して初めて駆動します。**この既定値を `true` に変えないこと。**
+  初回フィードバック受信時に現在角度を目標として保持するため、enable した瞬間に
+  飛び出さない設計にはなっていますが、それは安全柵の代わりにはなりません。
+- **使うのは `gm6020_dual.launch.py`** です。
+
+  ```bash
+  ros2 launch gm6020_control gm6020_dual.launch.py     # config/gm6020_dual.yaml を読む
+  ```
+
+- **`gm6020.launch.py`(単体ノード)はそのままでは起動できません。** 既定の `params_file` が
+  `config/gm6020.yaml` を指していますが、このファイルは失われており現存しません。
+  使う場合は `params_file:=` を必ず明示してください。
+- 同一 control id(`0x1FF` / `0x2FF`)を共有するモータは 1 フレームにまとめて送る必要が
+  あるため、**単体ノードと dual ノードを同時に走らせないこと**(互いの指令スロットを 0 で
+  上書きし合い、指令が破綻します)。
+- **PID ゲインは実機で未調整**です。現在の値は仕様/復元バイトコードの既定値で、実際に
+  運用されていたゲインは失われています。通電前に
+  [`robot/ros2/gm6020_control/README.md`](../robot/ros2/gm6020_control/README.md)
+  (プロトコル・トピック・パラメータの詳細)を必ず読んでください。
+- MCP2515(SPI CAN)の TX は約 500 Hz が上限です。`CAN send dropped` の warn が続く場合は
+  `send_rate_hz` を下げます。
+
+### kk03 の実構成
+
+GM6020 ×2 を **ID3 / ID4** で使用し、両方が control id `0x1FF` に載ります
+(フィードバックは `0x207` / `0x208`)。`config/gm6020_dual.yaml` がこの構成です。
+実機の DIP スイッチ設定と `motor_ids` が一致しているかは通電前に確認してください。

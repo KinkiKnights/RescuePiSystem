@@ -7,7 +7,7 @@
 #    1. 各コンポーネントの依存パッケージ導入
 #         master_control / joy_node_web / camera_publisher
 #    2. ROS 2 ワークスペース kk_ws の作成とリポジトリのクローン
-#         RescuePiSystem (+ submodule joy_node_web) と .repos の外部依存 (ros2_socketcan)
+#         RescuePiSystem と submodule (joy_node_web / ros2_socketcan / gm6020_control)
 #    3. rosdep 依存解決 と colcon ビルド
 #    4. master control の programs.json 生成 と 自動起動 (systemd) 設定
 #         ユニットは deploy/systemd/*.service.in を展開して設置する
@@ -20,6 +20,9 @@
 #         (~/.config/rescue-pi/devices.json) が持つ
 #    - mic_publisher/      : USB マイク → 16kHz PCM を集約ハブへ HTTP push
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
+#    - ros2/ros2_socketcan/: SocketCAN <-> ROS 2 ブリッジ (submodule/上流 OSS, colcon 対象)
+#    - ros2/gm6020_control/: GM6020 サーボ制御 (submodule, colcon 対象)
+#         ▲ 実モータを駆動する。docs/robot.md の「GM6020 モータ制御」を読むこと
 #
 #  通常は kk_robot_setup.sh から呼び出されます(環境変数を引き継ぎます)。
 #  単体でも実行できます(未設定の環境変数は既定値を使用):
@@ -83,30 +86,29 @@ sudo apt-get install -y alsa-utils python3-numpy
 
 # =============================================================================
 # 2. ROS2 ワークスペース kk_ws の作成とリポジトリのクローン
-#    Pi 側プログラムは RescuePiSystem に集約。joy_node_web は submodule
-#    (ros2/joy_node_web) として固定コミットで含む → submodule init が必要。
-#    外部 OSS (ros2_socketcan) のみ deploy/robot/rescue_pi_system.repos に定義し
-#    vcstool で取得します。
+#    Pi 側プログラムは RescuePiSystem に集約。共有 ROS 2 パッケージは robot/ros2/ 配下の
+#    submodule (joy_node_web / ros2_socketcan / gm6020_control) として固定コミットで
+#    含む → submodule init が必要。${WS}/src へ外部リポジトリを別途 clone しない
+#    (同名パッケージが二重になり colcon build が壊れる)。
 # =============================================================================
 log "2. ワークスペース ${WS} を作成しリポジトリをクローン"
 mkdir -p "${WS}/src"
 cd "${WS}/src"
 
-# --recursive で submodule (joy_node_web) も同時に取得。既存 clone の場合に
+# --recursive で submodule (joy_node_web / ros2_socketcan / gm6020_control) も同時に
+# 取得。gm6020_control は private リポジトリなので SSH キーの登録が必要。既存 clone の場合に
 # 備え submodule update も明示実行(未取得なら空ディレクトリ→ビルド失敗を防ぐ)。
 # clone は SSH (SSH キー) を優先し、失敗時のみ HTTPS (公開時のみ有効)。
 [ -d "${REPO_DIR}" ] \
   || GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git clone --recursive "${REPO_SSH}" "${REPO_DIR}" \
   || git clone --recursive "${REPO_URL}" "${REPO_DIR}"
 git -C "${REPO_DIR}" submodule update --init --recursive
-vcs import "${WS}/src" < "${REPO_DIR}/deploy/robot/rescue_pi_system.repos"
 chmod +x "${REPO_DIR}/robot/camera_publisher/"*.sh
 
 # =============================================================================
 # 3. rosdep 依存解決 と colcon ビルド
-#    colcon は package.xml を持つパッケージのみビルド:
-#      RescuePiSystem/robot/ros2/joy_node_web / RescuePiSystem/robot/ros2/kk_can_bringup
-#      / ros2_socketcan / ros2_socketcan_msgs
+#    colcon は package.xml を持つパッケージのみビルド (すべて RescuePiSystem/robot/ros2/):
+#      joy_node_web / kk_can_bringup / ros2_socketcan / ros2_socketcan_msgs / gm6020_control
 #    (master_control / camera_publisher / mic_publisher は ROS パッケージではない)
 #    rosdep が ros2_socketcan の依存 (ros-jazzy-can-msgs 等) を自動導入します。
 #    ※ rosdep の初期化・更新 (rosdep init / update) は env_setup.sh で実施済み。
@@ -121,7 +123,7 @@ colcon build --symlink-install
 
 # =============================================================================
 # 3.5 CAN (MCP2515 HAT) のシステム側 bring-up — 既定で無効(HAT 装着機のみ)
-#    ROS パッケージ (kk_can_bringup / ros2_socketcan) は上の colcon build で
+#    ROS パッケージ (kk_can_bringup / ros2_socketcan、いずれも robot/ros2/) は上の colcon build で
 #    ビルド済み。ここでは overlay / /etc/default/kk-can / systemd 等のシステム側を
 #    can_setup.sh で構成する。HAT 未装着機で有効化するとサービスが失敗するため既定無効。
 #    有効化: SETUP_CAN=1 を付けて実行。

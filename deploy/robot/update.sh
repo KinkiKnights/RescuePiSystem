@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 #  既にセットアップ済みの Pi で、リポジトリの更新を取り込みます:
 #    1. RescuePiSystem の git pull(+ submodule joy_node_web の更新)
-#    2. 外部依存 (.repos: ros2_socketcan) の vcs pull
+#    2. (外部依存も submodule なので 1. の submodule update で一緒に追従します)
 #    3. colcon 再ビルド
 #    4. master-control.service の再起動(稼働中の場合)
 #
@@ -38,19 +38,16 @@ python3 "${REPO_DIR}/robot/device_config.py" --init || log "   (初期化に失�
 log "1. RescuePiSystem を pull(現在のブランチを追従)"
 BRANCH="$(git -C "${REPO_DIR}" rev-parse --abbrev-ref HEAD)"
 git -C "${REPO_DIR}" pull --ff-only origin "${BRANCH}"
-log "   -> submodule (joy_node_web) を追従"
+log "   -> submodule (joy_node_web / ros2_socketcan / gm6020_control) を追従"
 git -C "${REPO_DIR}" submodule update --init --recursive
 
 # =============================================================================
-# 2. 外部依存 (.repos: ros2_socketcan) を更新
+# 2. 外部依存について
+#    外部の ROS 2 パッケージ (ros2_socketcan / gm6020_control) は robot/ros2/ 配下の
+#    submodule なので、上の submodule update で親リポジトリが指す固定コミットに
+#    揃います。vcstool による ${WS}/src への別途 clone は廃止しました
+#    (同名パッケージが二重になり colcon build が壊れるため)。
 # =============================================================================
-log "2. 外部依存を vcs pull"
-if command -v vcs >/dev/null 2>&1; then
-  vcs import "${WS}/src" < "${REPO_DIR}/deploy/robot/rescue_pi_system.repos"   # 未取得の依存を補完
-  vcs pull "${WS}/src" || log "   (一部の vcs pull をスキップ)"
-else
-  log "   (vcstool 未導入のためスキップ: env_setup.sh を実行してください)"
-fi
 
 # 配信スクリプトの実行権限を復旧(pull で失われることがある)
 chmod +x "${REPO_DIR}/robot/camera_publisher/"*.sh "${REPO_DIR}/robot/mic_publisher/"*.sh 2>/dev/null || true

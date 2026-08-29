@@ -37,10 +37,33 @@ USB接続されたカメラデバイスの映像をサーバー上のWebRTCリ�
 カメラデバイスはマスターコントロールから設定可能です。
 
 ## ROS2ワークスペース
-各機体共通で使用するROS2パッケージを含みます。
+各機体共通で使用するROS2パッケージを `robot/ros2/` に含みます（すべて colcon ビルド対象）。
 
-- JoyNodeWeb
-- kkCanBringup
+| パッケージ | 取り込み方 | 役割 |
+|---|---|---|
+| `joy_node_web` | submodule | Web ゲームパッド → `sensor_msgs/Joy`（:8700 `/joys`） |
+| `kk_can_bringup` | このリポジトリの実体 | MCP2515 SocketCAN + `ros2_socketcan` ブリッジの bringup |
+| `ros2_socketcan`（+`ros2_socketcan_msgs`） | submodule（上流 OSS） | SocketCAN ⇔ ROS 2 ブリッジ |
+| `gm6020_control` | submodule | DJI GM6020 モータのサーボ（位置）制御。**実アクチュエータを駆動する** → [安全上の注意](#gm6020_control-の安全上の注意) |
+
+### gm6020_control の安全上の注意
+
+`gm6020_control` は **実際の GM6020 モータへ CAN 指令を送る**パッケージです。
+`ros2_socketcan` ブリッジ（`/to_can_bus`）を経由せず、raw SocketCAN で `can0` を
+直接読み書きします（GM6020 の約 1 kHz フィードバックを取りこぼさないため）。
+動作確認のつもりで気軽に起動してよいノードではありません。
+
+- **`config/gm6020_dual.yaml` の `start_enabled: false` が安全柵**です。起動直後は
+  出力 0 のままで、`~/enable` に `true` を publish した**瞬間からモータが回ります**。
+  この既定値を `true` に変えないこと。
+- **使うのは `gm6020_dual.launch.py`** です。`gm6020.launch.py` は既定の params_file が
+  現存しない `config/gm6020.yaml` を指しているため、**そのままでは起動できません**
+  （使う場合は `params_file:=` を必ず明示する）。
+- 同一 control id（`0x1FF` / `0x2FF`）を共有するモータは 1 フレームにまとめて送る必要が
+  あるため、単体ノード（`gm6020_node`）と dual ノード（`gm6020_dual_node`）を
+  **同時に走らせないこと**（互いの指令を 0 で上書きし合う）。
+- PID ゲインは復元時の既定値で **実機では未調整**です。通電前に
+  [`robot/ros2/gm6020_control/README.md`](robot/ros2/gm6020_control/README.md) を読むこと。
 
 
 # 変更履歴
@@ -67,6 +90,7 @@ KinkiKnights レスキューロボットの **号機 (Raspberry Pi) と運用サ
  mic_publisher     ──PCM push─────▶          mic_hub       :8770        engineer / reporter
  joy_node_web      :8700 ◀── /joys ──        voice_comm    :8766        master
  kk_can_bringup    ──▶ CAN                    └▶ damiyan-detector :8771-3 (外部リポジトリ)
+ gm6020_control    ──▶ CAN (raw SocketCAN。実モータを駆動する)
 ```
 
 | ポート | プロセス | ホスト |
@@ -92,8 +116,18 @@ docs/       ドキュメント        … architecture / protocols / spec / oper
 archive/    現役でない参考資料  … 旧 mic relay, 旧プロトタイプ画面, 原典仕様
 ```
 
-`robot/ros2/joy_node_web` だけは他ロボットでも使う共有パッケージなので
-**submodule**（固定コミット参照）。clone は `--recursive` を付ける。
+`robot/ros2/` の 3 つは他ロボット・上流 OSS と共有するパッケージなので
+**submodule**（固定コミット参照）。実体をコピーせず、どの版を積んでいるかを
+gitlink の SHA で示す。clone には必ず `--recursive` を付ける。
+
+| パス | URL | 公開 | 備考 |
+|---|---|---|---|
+| `robot/ros2/joy_node_web` | `https://github.com/KinkiKnights/joy_node_web.git` | public | 他ロボットでも使う共有パッケージ |
+| `robot/ros2/ros2_socketcan` | `https://github.com/autowarefoundation/ros2_socketcan.git` | public（外部 OSS） | KinkiKnights の管理下でないため **`https://`** で参照する（SSH キーが無い環境でも `--recursive` clone できる） |
+| `robot/ros2/gm6020_control` | `git@github.com:KinkiKnights/gm6020_control.git` | **private** | private なので **SSH 形式**。clone には GitHub の SSH キー登録が必要 |
+
+固定しているコミットは `git ls-files -s robot/ros2` で確認できる（gitlink の SHA）。
+`--recursive` を付け忘れたら `git submodule update --init --recursive`。
 
 ## セットアップ
 
@@ -109,6 +143,10 @@ curl -fsSL https://raw.githubusercontent.com/KinkiKnights/RescuePiSystem/main/de
 git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git ~/kk_ws/src/RescuePiSystem
 ~/kk_ws/src/RescuePiSystem/deploy/server/kkrtx_setup.sh
 ```
+
+`--recursive` で `robot/ros2/` の submodule 3 件も同時に展開される。うち
+`gm6020_control` は **private リポジトリ**なので、GitHub の SSH キーが登録済みで
+ある必要がある（号機セットアップはキー登録から始まるので通常は問題にならない）。
 
 詳細は [docs/robot.md](docs/robot.md)（号機）と [docs/operations.md](docs/operations.md)（kkrtx）。
 

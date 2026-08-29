@@ -11,7 +11,8 @@ RescuePiSystem は **3 種類のホスト**にまたがる 1 つのシステム�
 | kkrtx | 運用サーバ（192.168.10.3） | `server/` | `deploy/server/kkrtx_setup.sh` |
 | 操作端末 | PC / スマホのブラウザ | なし（kkrtx を見るだけ） | — |
 
-外部にあるもの: `joy_node_web`(submodule)、`ros2_socketcan`(`.repos`)、
+外部にあるもの: `robot/ros2/` 配下の submodule 3 件（`joy_node_web` /
+`ros2_socketcan` / `gm6020_control`）と、
 `damiyan-signal-processing`（kkrtx 上で動くが別リポジトリ。→ [protocols/damiyan.md](protocols/damiyan.md)）。
 
 ## データフロー
@@ -32,6 +33,7 @@ RescuePiSystem は **3 種類のホスト**にまたがる 1 つのシステム�
   │   programs.json を起動/停止  │        │ voice_comm          :8766  │◀──▶│ PTT 音声     │
   │                             │        │                            │    │              │
   │ kk_can_bringup ──▶ CAN      │        └────────────────────────────┘    └──────────────┘
+  │ gm6020_control ──▶ CAN      │
   └─────────────────────────────┘
 ```
 

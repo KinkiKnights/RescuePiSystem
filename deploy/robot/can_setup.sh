@@ -11,8 +11,8 @@
 #    5. /usr/local/sbin/kk-can-ros-launch.sh (ros2_socketcan bridge 起動) を生成
 #    6. systemd ユニット can0-setup.service / kk-can-ros.service を生成・有効化
 #
-#  ※ ROS パッケージ (kk_can_bringup / ros2_socketcan) の取得・ビルドは
-#    app_setup.sh の vcs import + colcon build が担当します。本スクリプトは
+#  ※ ROS パッケージ (robot/ros2/ の kk_can_bringup / ros2_socketcan) の取得・ビルドは
+#    app_setup.sh の submodule 取得 + colcon build が担当します。本スクリプトは
 #    システム側(overlay / systemd / 起動スクリプト)のみを担当します。したがって
 #    app_setup.sh の colcon build 後、または新規セットアップ完了後に実行してください。
 #

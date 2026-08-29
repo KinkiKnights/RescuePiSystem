@@ -21,8 +21,9 @@
 #    - mic_publisher/      : USB マイク → 16kHz PCM を集約ハブへ HTTP push
 #    - ros2/joy_node_web/  : Web ゲームパッド → sensor_msgs/Joy (submodule, colcon 対象)
 #    - ros2/kk_can_bringup/: MCP2515 SocketCAN + ros2_socketcan bringup (colcon 対象)
-#  外部 OSS は deploy/robot/rescue_pi_system.repos で参照(vcs import):
-#    - ros2_socketcan      : CAN 通信 (上流 OSS)
+#  外部の ROS 2 パッケージも robot/ros2/ 配下の submodule として同梱(固定コミット):
+#    - ros2/ros2_socketcan/: CAN 通信 (上流 OSS。URL は https://)
+#    - ros2/gm6020_control/: GM6020 サーボ制御 (private。URL は git@。実モータを駆動する)
 #  CAN(MCP2515 HAT)のシステム側 bring-up は setup/can_setup.sh が担当
 #  (HAT 装着機のみ。SETUP_CAN=1 で app_setup.sh から実行、または単体実行)。
 #
