@@ -71,6 +71,42 @@ journalctl -u mic-publisher -f
 `programs.json` は tracked なので `git pull` で巻き戻るリスクがある。
 巻き戻ったら mic が旧 GStreamer 版のコマンドに戻るため、更新後は必ず確認する。
 
+#### `programs.json` をリポジトリ外へ逃がす（推奨）
+
+`programs.json` は「号機ごとの運用値」（規約 6）でありながら、master_control 自身が
+実行時に書き換える（Web UI の autostart トグルと設定エディタの保存）。tracked な
+ファイルを動いているアプリが上書きするので、`git pull` との衝突は構造的に避けられない。
+
+`MASTER_CONTROL_PROGRAMS` に**リポジトリ外の**パスを渡すと、master_control は
+そちらを読み書きする。未設定なら従来どおり `robot/master_control/programs.json`
+を使う（既存の号機はそのままで動く）。親ディレクトリが無ければ書き込み時に作る。
+
+```bash
+mkdir -p ~/.config/rescue-pi
+cp ~/kk_ws/src/RescuePiSystem/robot/master_control/programs.json \
+   ~/.config/rescue-pi/programs.json      # 既存があれば引き継ぐ
+sudo editor ~/.config/rescue-pi/programs.json   # 号機に合わせて直す
+```
+
+`master-control.service` に環境変数を足す（`deploy/systemd/master-control.service.in`
+は既定を触らないので、号機側は drop-in で指定する）:
+
+```bash
+sudo systemctl edit master-control.service
+# [Service]
+# Environment=MASTER_CONTROL_PROGRAMS=/home/kk/.config/rescue-pi/programs.json
+sudo systemctl restart master-control.service
+systemctl show master-control.service -p Environment   # 反映確認
+```
+
+master_control が使う環境変数:
+
+| 変数 | 既定 | 用途 |
+|---|---|---|
+| `MASTER_CONTROL_PROGRAMS` | `robot/master_control/programs.json` | プログラム定義の読み書き先 |
+| `MASTER_CONTROL_PORT` | `80` | 待ち受けポート（検証時に非特権ポートへ） |
+| `MASTER_AUTOSTART_DRYRUN` | 未設定 | `1` で autostart の対象をログするだけで起動しない |
+
 ### 号機ごとの設定
 
 | 号機 | `MIC_UNIT` | `MIC_DEVICE` | 備考 |

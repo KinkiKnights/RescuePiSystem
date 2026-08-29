@@ -175,6 +175,9 @@ cd ~/kk_ws && colcon build
   `deploy/robot/app_setup.sh` だけが生成します(リポジトリ内に .service ファイルの複製を置かない)。
 - `robot/master_control/programs.json` はセットアップスクリプトが Pi ごとに生成する運用ファイルです。
   リポジトリには KK05 の実例をコミットしてあります。
+  tracked なので `git pull` で巻き戻ります。`MASTER_CONTROL_PROGRAMS` に
+  リポジトリ外のパス（例 `~/.config/rescue-pi/programs.json`）を渡せば、
+  master_control はそちらを読み書きします（→ `docs/operations.md`）。
 - サービス操作: `sudo systemctl restart master-control.service` / `journalctl -u master-control -f`
 
 ## CAN (MCP2515 SPI HAT) 接続

@@ -18,11 +18,32 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 環境変数として注入し、Web UI からは候補を選んで保存できるようにする。
 sys.path.insert(0, os.path.dirname(BASE_DIR))
 import device_config  # noqa: E402
-PROGRAMS_FILE = os.path.join(BASE_DIR, 'programs.json')
+# programs.json は「号機ごとの運用値」でありながら、アプリ自身が実行時に書き換える
+# (set_autostart / 設定エディタの保存)。リポジトリ内に置くと git 追跡下のファイルを
+# 実行中に上書きすることになり、git pull と構造的に衝突する
+# (CLAUDE.md 規約6:「リポジトリ内の設定ファイルに書くと git pull で差分が巻き戻る
+#  ―― programs.json で実際に起きた」)。
+# MASTER_CONTROL_PROGRAMS を指定すればリポジトリ外 (例:
+# ~/.config/rescue-pi/programs.json) へ逃がせる。未設定なら従来どおりリポジトリ内を
+# 使うので既存の号機の挙動は変わらない。
+PROGRAMS_FILE = os.environ.get('MASTER_CONTROL_PROGRAMS') or os.path.join(BASE_DIR, 'programs.json')
 INDEX_FILE    = os.path.join(BASE_DIR, 'index.html')
 # 既定は 80 (systemd ユニットが CAP_NET_BIND_SERVICE を付ける)。検証時は
 # MASTER_CONTROL_PORT で非特権ポートに変えられる。
 PORT = int(os.environ.get('MASTER_CONTROL_PORT') or 80)
+
+
+def _save_programs(configs):
+    """programs.json を書き出す (親ディレクトリが無ければ作る)。
+
+    MASTER_CONTROL_PROGRAMS でリポジトリ外を指した場合、初回書き込みの時点では
+    ~/.config/rescue-pi/ がまだ無いことがあるため、ここで作ってから書く。
+    """
+    parent = os.path.dirname(PROGRAMS_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(PROGRAMS_FILE, 'w') as f:
+        json.dump(configs, f, ensure_ascii=False, indent=2)
 
 
 def _terminate_tree(proc, grace=5.0):
@@ -190,8 +211,7 @@ class ProcessManager:
                 else:
                     prev = old.get(c['id'])
                     c['autostart'] = bool(prev.get('autostart', False)) if prev else False
-            with open(PROGRAMS_FILE, 'w') as f:
-                json.dump(new_configs, f, ensure_ascii=False, indent=2)
+            _save_programs(new_configs)
             self.programs = {c['id']: dict(c, process=None) for c in new_configs}
 
     def set_autostart(self, prog_id, enabled):
@@ -202,8 +222,7 @@ class ProcessManager:
             if not prog:
                 return False, 'Program not found'
             prog['autostart'] = bool(enabled)
-            with open(PROGRAMS_FILE, 'w') as f:
-                json.dump(self._snapshot(), f, ensure_ascii=False, indent=2)
+            _save_programs(self._snapshot())
             state = 'ON' if enabled else 'OFF'
             return True, f"#{prog_id} autostart {state}"
 
