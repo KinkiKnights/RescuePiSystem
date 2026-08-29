@@ -55,6 +55,36 @@ SETUP_SERVICES=0 ./deploy/server/kkrtx_setup.sh
   常駐運用と違い `/etc/default/mic-hub` は読まない。ディスク残量に合わせること
   （16kHz/mono は 115 MB/時・号機あたり）。
 
+#### 機体ごとの値は `~/.config/rescue-pi/server.env` に置く
+
+ディスク容量やポートの都合は機体ごとに違う。リポジトリ内の既定値を書き換えると
+`git pull` で巻き戻るうえ、1 台の事情がフリート共通の既定になってしまうので、
+機体固有の値は**リポジトリの外**に置く（規約 6。号機の `devices.json` と同じ
+`~/.config/rescue-pi/` 配下）。中身はただの `KEY=value`。ファイルは無くてよい
+（無ければスクリプトの既定値で動く）。置き場所は `RESCUE_SERVER_ENV` で変えられる。
+
+```bash
+$ cat ~/.config/rescue-pi/server.env
+# kkrtx 固有の運用値 (git 管理外)。優先順位: コマンドライン > このファイル > 既定値
+# / の残量 19GB に対し既定 8GB x 5 号機 x 24 時間保持は約 14GB になり圧迫するため
+MIC_HUB_MAX_GB=1
+```
+
+優先順位は **コマンドライン > `server.env` > スクリプト既定値**。
+
+```bash
+./deploy/server/server_ctl.sh start mic_hub                  # --max-gb 1 (server.env)
+MIC_HUB_MAX_GB=2 ./deploy/server/server_ctl.sh start mic_hub # --max-gb 2 (コマンドライン)
+# server.env を置かなければ                                   # --max-gb 8 (既定値)
+```
+
+**kkrtx では `MIC_HUB_MAX_GB=1` にしている。** 算出根拠は次のとおり。16kHz/mono の
+録音は 115 MB/時・号機あたり。`MIC_HUB_RETENTION_HOURS=24` のまま 5 号機を 24 時間
+動かすと 115MB × 24h × 5 = **約 14GB** になり、`/` の残量 19GB を圧迫する
+（`MIC_HUB_MAX_GB` は号機ごとの上限なので、既定の 8GB は事実上この保持時間の側で
+決まる量に張り付く）。1GB/号機なら 5 号機でも 5GB に収まる。**この値は kkrtx の
+ディスク事情に由来するものなので、リポジトリ内の既定値（8GB）は変えていない。**
+
 **操作画面のポートに注意。** systemd ユニットは `AmbientCapabilities=CAP_NET_BIND_SERVICE`
 を持つので一般ユーザのまま port 80 に bind できるが、手で起動する場合それが無い。
 そのため `server_ctl.sh` は `control_ui_port` が特権ポート（<1024）だったとき、

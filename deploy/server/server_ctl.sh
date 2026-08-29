@@ -25,8 +25,13 @@
 #  ポートは config/units.json が単一の真実 (CLAUDE.md 規約 5)。下の環境変数で
 #  一時的に上書きできる。
 #
+#  機体ごとの運用値は ~/.config/rescue-pi/server.env に置く (規約 6)。
+#  優先順位は **コマンドライン > server.env > スクリプト既定値**。
+#
 #  環境変数:
 #    REPO_DIR               リポジトリの場所 (既定: このスクリプトから自動判定)
+#    RESCUE_SERVER_ENV      機体ごとの設定ファイル
+#                           (既定 ~/.config/rescue-pi/server.env。無くてもよい)
 #    RESCUE_STATE_DIR       PID / ログの置き場所 (既定 ~/.local/state/rescue-pi)
 #    CONTROL_UI_PORT        操作画面のポート (既定: units.json の control_ui_port)
 #    CONTROL_UI_UNPRIV_PORT 特権ポートを避けるときの代替ポート (既定 8000)
@@ -38,17 +43,68 @@
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# ワークスペース直下などにシンボリックリンクを置いて叩けるよう、リンクを解決して
+# から実体の位置を求める。解決しないと dirname がリンクの置き場所を返すので、
+# そこから 2 つ上を REPO_DIR にしている下の行が見当違いの場所を指す
+# (例: ~/kk_mft_ws/server_ctl.sh から呼ぶと REPO_DIR が /home/kk になる)。
+SCRIPT_SRC="${BASH_SOURCE[0]:-$0}"
+[ -L "${SCRIPT_SRC}" ] && SCRIPT_SRC="$(readlink -f "${SCRIPT_SRC}")"
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SRC}")" && pwd)"
 : "${REPO_DIR:=$(cd "${SCRIPT_DIR}/../.." && pwd)}"
-: "${RESCUE_STATE_DIR:=${XDG_STATE_HOME:-$HOME/.local/state}/rescue-pi}"
-PID_DIR="${RESCUE_STATE_DIR}/run"
-LOG_DIR="${RESCUE_STATE_DIR}/log"
 
 SERVICES=(control_ui webrtc_relay voice_comm mic_hub)
 
 log()  { printf '\033[1;35m[server-ctl]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[server-ctl]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[server-ctl]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# -----------------------------------------------------------------------------
+# 機体ごとの運用値 (~/.config/rescue-pi/server.env)
+# -----------------------------------------------------------------------------
+#  ディスク容量やポートの都合は機体ごとに違うので、リポジトリの外に置く
+#  (CLAUDE.md 規約 6。リポジトリ内の既定値を書き換えると git pull で巻き戻るし、
+#   1 台の事情がフリート共通の既定になってしまう)。
+#  中身はただの KEY=value。例:
+#      MIC_HUB_MAX_GB=1
+#
+#  読み込みは下の : "${VAR:=...}" 群より **前** でなければならない。後ろだと
+#  既定値の代入が先に効いてしまい、ファイルに書いた値が無視される。
+#
+#  優先順位は コマンドライン > server.env > スクリプト既定値。
+#  source すると単純代入がコマンドラインの値を踏み潰すので、先に退避しておいて
+#  後から書き戻す。こうすればファイル側は素の KEY=value のままでよい。
+: "${RESCUE_SERVER_ENV:=${XDG_CONFIG_HOME:-$HOME/.config}/rescue-pi/server.env}"
+
+RESCUE_ENV_KEYS=(
+  REPO_DIR RESCUE_STATE_DIR
+  CONTROL_UI_PORT CONTROL_UI_UNPRIV_PORT CONTROL_UI_SUDO CONTROL_UI_RELOAD
+  RELAY_PORT VOICE_PORT MIC_HUB_PORT
+  MIC_HUB_OUTDIR MIC_HUB_SEGMENT MIC_HUB_RETENTION_HOURS MIC_HUB_MAX_GB
+  STOP_GRACE
+)
+
+load_server_env() {
+  local f="${RESCUE_SERVER_ENV}" k kv
+  [ -f "${f}" ] || return 0                     # 無くてよい。エラーにしない
+  if [ ! -r "${f}" ]; then
+    warn "設定ファイルを読めません (無視して続けます): ${f}"
+    return 0
+  fi
+  local -a saved=()
+  for k in "${RESCUE_ENV_KEYS[@]}"; do
+    [ -n "${!k+set}" ] && saved+=("${k}=${!k}")  # コマンドラインで来た値を退避
+  done
+  # shellcheck disable=SC1090
+  set -a; . "${f}" || die "設定ファイルの読み込みに失敗しました: ${f}"; set +a
+  for kv in ${saved[@]+"${saved[@]}"}; do
+    export "${kv%%=*}=${kv#*=}"                  # コマンドラインを勝たせる
+  done
+}
+load_server_env
+
+: "${RESCUE_STATE_DIR:=${XDG_STATE_HOME:-$HOME/.local/state}/rescue-pi}"
+PID_DIR="${RESCUE_STATE_DIR}/run"
+LOG_DIR="${RESCUE_STATE_DIR}/log"
 
 # -----------------------------------------------------------------------------
 # 設定 (ポートは units.json から。jq を要求しない = 標準ライブラリの python3 だけ)

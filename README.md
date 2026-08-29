@@ -160,6 +160,10 @@ SETUP_SERVICES=0 ~/kk_ws/src/RescuePiSystem/deploy/server/kkrtx_setup.sh
 ```
 
 systemd 常駐と `server_ctl.sh` を**同時に使わないこと**（ポートが衝突する）。
+
+ディスク容量に応じた `MIC_HUB_MAX_GB` など**機体ごとの運用値**は
+`~/.config/rescue-pi/server.env` に置く（リポジトリ外・git 管理外）。優先順位は
+コマンドライン > `server.env` > スクリプト既定値。
 詳細は [docs/operations.md](docs/operations.md)。
 
 ## ドキュメント
