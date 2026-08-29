@@ -1,7 +1,90 @@
 <launch>
+  <!--
+    SocketCAN <-> ROS 2 ブリッジ。ros2_socketcan のブリッジを既定値付きで包むだけである。
+
+      ros2 launch kk_can_bringup can_bridge.launch.xml
+      ros2 launch kk_can_bringup can_bridge.launch.xml interface:=vcan0 enable_frame_loopback:=true
+
+    このブリッジが出す/受けるトピック（ros2_socketcan の既定）:
+      /from_can_bus  can_msgs/Frame   受信（下の filters を通ったフレームだけ）
+      /to_can_bus    can_msgs/Frame   送信
+
+    ▲ can0 を上げるのはこの launch の仕事ではない。root 権限が要るため、
+      機体では can0-setup.service が上げている（deploy/robot/can_setup.sh が設置する）。
+      手で上げるなら:
+        sudo ip link set can0 up type can bitrate 1000000 restart-ms 100
+  -->
   <arg name="interface" default="can0"/>
-  <include file="$(find-pkg-share ros2_socketcan)/launch/socket_can_bridge.launch.xml">
-    <arg name="interface" value="$(var interface)"/>
-    <arg name="enable_can_fd" value="false"/>
-  </include>
+
+  <!--
+    受信フィルタ。既定はサーボ基板の帰還エコー 0x210 / 0x211 だけを通す。
+
+    書式は ros2_socketcan の "ID:MASK"（16 進、カンマ区切り）で、
+    (受信ID & MASK) == (ID & MASK) が成立するフレームだけが /from_can_bus へ出る。
+
+      MASK = C00007FE
+        0x7FE  ... 11 bit 標準 ID の下位 1 bit だけを無視する。
+                   0x210 と 0x211 の 2 本がまとめて一致する。
+        0x8000_0000 (EFF) と 0x4000_0000 (RTR) を立てているのは、
+        拡張 ID フレームとリモート要求フレームを「別物」として弾くため。
+        ここを 0 にすると、同じ下位 11 bit を持つ拡張 ID が標準 ID として
+        紛れ込み、サーボの現在値として解釈される。
+
+    既定を 0:0（全通過）にしない理由。バス上は自送の 0x1FF を含めて
+    3 kfps 規模になるが、購読者が要るのは 0x210 / 0x211 だけである。
+    全通過にすると、その全部を DDS で再配信することになり、
+    受信側の遅延と取りこぼしを制御ループの外側で作り込むことになる。
+    ▲ ros2_socketcan 側の既定は 0:0 である。ここで明示的に渡さないと
+      全通過になる（この引数を落とすと無言で退行する）。
+
+    アーム側（0x207 / 0x208 の GM6020 帰還）はこのブリッジを通らない。
+    アーム制御ノード（kk_ws の arm_node / gm6020_control。本リポジトリの外）が
+    生 SocketCAN で直接読むので、ここに足す必要はない。
+
+    別 ID を見たいときは launch 引数で上書きする:
+      ros2 launch kk_can_bringup can_bridge.launch.xml filters:=0:0
+  -->
+  <arg name="filters" default="210:C00007FE"/>
+
+  <!--
+    送信フレームのローカルループバック。既定は無効で、実バスではこれが正しい。
+    物理バスへ出たフレームは他ノードが受信でき、自送分まで DDS へ回すのは無駄だからである。
+
+    **vcan では有効にしないと送信が誰にも見えない。** vcan は物理バスを持たず、
+    カーネルのローカルループバックだけが唯一の伝送路である。ここが無効だと
+    /to_can_bus へ流したフレームは candump にも他ソケットにも現れず、
+    「ノードが送っていない」ように見える。実際には送っている。
+
+    注入する側（cansend）は既定でループバック有効なので、受信だけは無効でも見える。
+    この非対称が「注入は見えるのに送信は見えない」という紛らわしい症状になる。
+
+      ros2 launch kk_can_bringup can_bridge.launch.xml \
+        interface:=vcan0 enable_frame_loopback:=true
+  -->
+  <arg name="enable_frame_loopback" default="false"/>
+
+  <!--
+    ノード名の衝突回避用。既定は空 = ros2_socketcan の素の名前
+    （/socket_can_receiver, /socket_can_sender）をそのまま使う。
+    空のときの実効名前空間はルート "/" で、この引数が無かったときと同一である。
+
+    ▲ 既に kk-can-ros.service が同じ can0 でブリッジを上げている状態で
+      検証用にもう一組上げると、同名の lifecycle ノードが 2 つになる。
+      launch は change_state サービスをノード名で引くため、どちらに当たるかが
+      不定になり、**動いているブリッジを止めてしまう恐れがある。**
+      その場合は名前空間を分けること:
+        ros2 launch kk_can_bringup can_bridge.launch.xml namespace:=can_test
+      （SocketCAN 自体は複数の受信ソケットを許容するので、受信は共存できる）
+  -->
+  <arg name="namespace" default=""/>
+
+  <group>
+    <push-ros-namespace namespace="$(var namespace)"/>
+    <include file="$(find-pkg-share ros2_socketcan)/launch/socket_can_bridge.launch.xml">
+      <arg name="interface" value="$(var interface)"/>
+      <arg name="enable_can_fd" value="false"/>
+      <arg name="filters" value="$(var filters)"/>
+      <arg name="enable_frame_loopback" value="$(var enable_frame_loopback)"/>
+    </include>
+  </group>
 </launch>
