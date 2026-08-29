@@ -22,6 +22,56 @@ systemctl status mic-hub
 
 追加パッケージは不要（Python 標準ライブラリのみ）。
 
+### 4 サービスをまとめて起動・停止する（常駐させない運用）
+
+kkrtx の 4 プロセス（`control_ui` / `webrtc_relay` / `voice_comm` / `mic_hub`）は
+`deploy/server/server_ctl.sh` でまとめて起動・停止できる。競技や試験のときだけ
+立ち上げて、終わったら落とす運用向け。**systemd 常駐（`kkrtx_setup.sh` を
+`SETUP_SERVICES=1`＝既定で実行）と併用しないこと**（同じポートを取り合う）。
+
+```bash
+# 依存の導入と relay のビルドだけ済ませる（systemd ユニットは設置しない）
+SETUP_SERVICES=0 ./deploy/server/kkrtx_setup.sh
+
+./deploy/server/server_ctl.sh start             # 4 つ全部
+./deploy/server/server_ctl.sh start mic_hub     # 個別指定（複数可）
+./deploy/server/server_ctl.sh status            # PID・稼働時間・ポートの待受
+./deploy/server/server_ctl.sh logs -f control_ui
+./deploy/server/server_ctl.sh restart
+./deploy/server/server_ctl.sh stop              # プロセスグループごと停止
+```
+
+- PID とログは**リポジトリの外** `~/.local/state/rescue-pi/{run,log}` に置く
+  （`RESCUE_STATE_DIR` で変更可）。リポジトリを汚さないため。
+- `stop` は `setsid` で作った**プロセスグループごと** SIGTERM → 猶予
+  （`STOP_GRACE`、既定 8 秒）→ SIGKILL する。孤児を残さないための作りで、
+  考え方は `robot/master_control/master_server.py` の `_terminate_tree()` と同じ。
+- PID ファイルのプロセスが生きていれば `start` は何もしない（二重起動の防止）。
+  ポートが他プロセスに使われている場合も起動を中止する。
+- ポートは `config/units.json` の `server.*` を読む。一時的に変えたいときだけ
+  `CONTROL_UI_PORT` / `RELAY_PORT` / `VOICE_PORT` / `MIC_HUB_PORT` で上書きする。
+- `mic_hub` の録音先と上限は `MIC_HUB_OUTDIR`（既定 `~/kk_ws/logs/mic-recordings`）
+  `MIC_HUB_MAX_GB` / `MIC_HUB_RETENTION_HOURS` / `MIC_HUB_SEGMENT` で渡す。
+  常駐運用と違い `/etc/default/mic-hub` は読まない。ディスク残量に合わせること
+  （16kHz/mono は 115 MB/時・号機あたり）。
+
+**操作画面のポートに注意。** systemd ユニットは `AmbientCapabilities=CAP_NET_BIND_SERVICE`
+を持つので一般ユーザのまま port 80 に bind できるが、手で起動する場合それが無い。
+そのため `server_ctl.sh` は `control_ui_port` が特権ポート（<1024）だったとき、
+既定で `CONTROL_UI_UNPRIV_PORT`（既定 **8000**）へ退避する。操作画面の URL は
+`http://<kkrtx>:8000/` になる（画面内の relay / 音声 / mic hub への接続先は
+`location.hostname` と各固定ポートから組み立てるので、ここは影響を受けない）。
+
+従来どおり port 80 で待ち受けたいときは `control_ui` だけ sudo で起動する:
+
+```bash
+CONTROL_UI_SUDO=1 ./deploy/server/server_ctl.sh start control_ui
+```
+
+ただしこのとき control_ui が起動する子プロセス（damiyan 検出器など）も root に
+なり、ログが root 所有で作られる点に注意。`setcap` をシステムの python バイナリに
+付ける方法は、他の python プロセス全部に影響するので採らない。
+
 設定は `/etc/default/mic-hub` に置く。リポジトリ内の設定ファイルに書くと
 `git pull` で機体ごとの差分が巻き戻る（`programs.json` で実際に起きている）。
 
