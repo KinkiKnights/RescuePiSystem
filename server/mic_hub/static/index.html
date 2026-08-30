@@ -64,8 +64,19 @@
 <div class="empty" id="empty" hidden>号機がまだ 1 台も接続していません。</div>
 <footer id="foot"></footer>
 
+<!-- control_ui(:8000) の /mic/ から配信されたときに mic hub のポートを知るため。 -->
+<script src="/static/endpoints.js"></script>
 <script>
 "use strict";
+
+// この画面は control_ui(:8000) の /mic/ からも配信される。状態取得と音声試聴は
+// プロキシを挟まず mic hub のポートへ直接つなぐ（音声はストリームなので中継を
+// 挟みたくない）。ポートは units.json が単一の真実で、endpoints.js が渡す。
+// mic hub 自身から配信された場合は endpoints.js が無いので空文字＝同一オリジン。
+const HUB = (function () {
+  const port = ((window.RESCUE_ENDPOINTS) || {}).mic_hub_port;
+  return port ? location.protocol + "//" + location.hostname + ":" + port : "";
+})();
 
 const RATE = 16000;
 const grid = document.getElementById("grid");
@@ -161,7 +172,7 @@ class Player {
     this.tail = new Uint8Array(0);
   }
   async run() {
-    const res = await fetch(`/listen/${this.unit}?format=raw`,
+    const res = await fetch(`${HUB}/listen/${this.unit}?format=raw`,
                             { signal: this.abort.signal, cache: "no-store" });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const reader = res.body.getReader();
@@ -223,7 +234,7 @@ function stop(unit, btn) {
 // ---- ステータスのポーリング --------------------------------------------------
 async function poll() {
   try {
-    const r = await fetch("/api/status", { cache: "no-store" });
+    const r = await fetch(HUB + "/api/status", { cache: "no-store" });
     render(await r.json());
   } catch (e) {
     document.getElementById("foot").textContent = "hub に接続できません";

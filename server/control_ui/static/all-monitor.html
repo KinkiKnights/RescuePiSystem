@@ -45,9 +45,8 @@
     </div>
   </div>
   <script>
-    // WebRTC グリッドは 8080 の別ポートなので現在のホスト名から src を組み立てる。
-    document.getElementById('cellGrid').src =
-      location.protocol + '//' + location.hostname + ':8080/grid.html';
+    // グリッドは control_ui 自身が /grid で配信する（同一オリジン）。
+    document.getElementById('cellGrid').src = '/grid';
   </script>
 </body>
 </html>

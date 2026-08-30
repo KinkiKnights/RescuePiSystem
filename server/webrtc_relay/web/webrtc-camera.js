@@ -1,7 +1,7 @@
 // webrtc-camera.js — WebRTCカメラ視聴クライアント・ライブラリ
 //
 // 使い方:
-//   const cam = new WebRTCCamera();                 // serverは現在のホストから自動推定
+//   const cam = new WebRTCCamera();                 // serverは endpoints.js / 現在のホストから解決
 //   cam.connect(videoElement, "KK01");              // ビデオ要素と号機ID(KK0N)を渡すと自動接続
 //   cam.camChange(0);                               // カメラ番号切替 (0=スクリーン, 1=カメラ, 2..)
 //   cam.disconnect();
@@ -12,10 +12,23 @@
 //     onStats(stats):  { width, height, kbps, fps, jitterMs }  (1秒ごと)
 
 class WebRTCCamera {
+  // シグナリング先の既定値を決める。
+  //
+  // この JS は relay(:8080) 自身からも control_ui(:8000) からも配信されるので、
+  // 「ページを配っているホスト」が relay とは限らない。control_ui は
+  // /static/endpoints.js で units.json 由来のポート表を先に読み込ませるので、
+  // それがあれば relay のポートへ明示的につなぐ。無ければ同一オリジンとみなす。
+  //
+  // opts.server を渡した場合はそちらが優先される（common.js は号機ごとの中継先を
+  // この引数で明示指定している。その仕組みは変えない）。
+  static defaultServer() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const port = ((typeof window !== "undefined" && window.RESCUE_ENDPOINTS) || {}).relay_port;
+    return proto + "://" + (port ? location.hostname + ":" + port : location.host) + "/ws";
+  }
+
   constructor(opts = {}) {
-    const defaultServer =
-      (location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws";
-    this.server = opts.server || defaultServer;
+    this.server = opts.server || WebRTCCamera.defaultServer();
     this.onStatus = opts.onStatus || (() => {});
     this.onStats = opts.onStats || null;
 

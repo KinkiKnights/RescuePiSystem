@@ -22,6 +22,42 @@ systemctl status mic-hub
 
 追加パッケージは不要（Python 標準ライブラリのみ）。
 
+### 8000（control_ui）から開ける画面
+
+運用中にブラウザで開く URL は **control_ui の 1 つに集約**してある。
+`http://<kkrtx>/`（`server_ctl.sh` で手動起動している場合は `:8000`）を開けば、
+トップからすべての画面へ辿れる。
+
+| パス | 画面 | 実体 |
+|---|---|---|
+| `/` | トップ（全画面へのリンク） | `control_ui/static/index.html` |
+| `/control` `/analytics` `/engineer` `/reporter` `/master` | 操作画面 5 モード | `control_ui/static/` |
+| `/ping-monitor` `/all-monitor` `/control-panel` | 監視・統合画面 | 同上 |
+| `/grid` | WebRTC グリッド視聴（全号機のカメラをタイル表示） | `control_ui/static/grid.html` |
+| `/viewer/` | WebRTC ビュワー（1 号機ずつ） | `webrtc_relay/web/`（relay と同一実体） |
+| `/mic/` | マイク集約ハブの状態・試聴 | `mic_hub/static/`（hub と同一実体） |
+
+`/viewer/` と `/mic/` は**マウントしているだけでファイルは複製していない**（規約 1）。
+
+**プロキシは挟んでいない。** 8000 が配るのは HTML/JS/CSS だけで、データ接続は
+ブラウザから各サービスへ直接行く:
+
+- WebRTC のシグナリング → `ws://<kkrtx>:8080/ws`（映像そのものは WebRTC の
+  UDP を直接流れる。relay は SFU なので 8080 は通らない）
+- マイクの状態と試聴 → `http://<kkrtx>:8770/api/status`, `/listen/<unit>`
+- PTT 音声 → `ws://<kkrtx>:8766/voice`
+
+中継を挟まないので、映像・音声の遅延に段が増えない。**そのため 8080 / 8766 / 8770
+のサービスは 8000 とは別に動かし続ける必要がある**（`server_ctl.sh start` は 4 つ
+まとめて起動する）。機体側の接続先（`ws://…:8080/ws` と
+`http://…:8770/ingest/<unit>`）も従来のままで、号機の設定変更は要らない。
+
+接続先のポートは `config/units.json` の `server.*` が単一の真実（規約 5）。
+control_ui が `/api/endpoints`（JSON）と `/static/endpoints.js`
+（`window.RESCUE_ENDPOINTS` を定義する小さなシム）で JS へ渡すので、
+**画面側のコードにポート番号を書かない**。ポートを変えるときは `units.json`
+だけを直す。
+
 ### 4 サービスをまとめて起動・停止する（常駐させない運用）
 
 kkrtx の 4 プロセス（`control_ui` / `webrtc_relay` / `voice_comm` / `mic_hub`）は

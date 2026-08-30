@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebRTC グリッド視聴</title>
+<!--
+  グリッド視聴 — 全号機のカメラ映像をタイルで一覧する。
+
+  出典: KinkiKnights/WebRTCCameraRes2026 の web/grid.html (commit 8c2c5e6)。
+  統合前のリポジトリから復元し、現行の RescuePiSystem 仕様へ合わせ直した。
+  旧実装からの主な変更:
+    - 号機 ID の一覧を「?prefix と ?n から KK01..KK05 を生成」する方式から、
+      control_ui の /api/units（config/units.json の pi_id）を読む方式へ。
+      ID の単一の真実は units.json（CLAUDE.md 規約 5）。
+    - 録画 UI（/record?id=..&action=..）を削除。現行 relay に /record は無い
+      （旧 relay のみが持っていた機能で、統合時に落ちている）。
+    - シグナリング先は /static/endpoints.js が渡す relay_port から組み立てる。
+      このページは control_ui(:8000) から配信されるので、relay(:8080) へは
+      プロキシを挟まず直接つなぐ。
+  WebRTC の接続処理は自前で持たず、relay と同じ実体の webrtc-camera.js を使う
+  （CLAUDE.md 規約 1: コピーを別ディレクトリに置かない）。
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; }
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 12px; background: #1a1a1a; border-bottom: 1px solid #333;
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  a.back { color: #9bf; font-size: 13px; text-decoration: none; }
+  a.back:hover { text-decoration: underline; }
+  button {
+    background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 6px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { background: #333; }
+  input {
+    background: #222; color: #eee; border: 1px solid #444; border-radius: 6px;
+    padding: 5px 8px; font-size: 13px;
+  }
+  .note { font-size: 12px; color: #999; }
+
+  #grid {
+    display: grid; gap: 8px; padding: 8px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .tile { background: #000; border: 1px solid #333; border-radius: 8px; overflow: hidden; position: relative; }
+  .tile .vbox { width: 100%; aspect-ratio: 16 / 9; background: #000; position: relative; overflow: hidden; }
+  .tile video { width: 100%; height: 100%; background: #000; object-fit: contain; display: block; }
+  /* 表示回転（KK03 など。UNIT_ROTATION で号機を指定）。配信は横長のまま、
+     表示のみ時計回り 90 度回転してタイル枠内に収める（レターボックス）。 */
+  .tile.rot90 .vbox { container-type: size; }
+  .tile.rot90 video {
+    position: absolute; top: 50%; left: 50%;
+    width: 100cqh; height: 100cqw;
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+  .tile .bar {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    background: #181818; border-top: 1px solid #333; font-size: 12px;
+  }
+  .tile .name { font-weight: 600; }
+  .tile .status { color: #888; }
+  .tile .status.live { color: #4c9; }
+  .tile .status.err { color: #e66; }
+  .tile .stats { color: #789; margin-left: auto; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <h1>WebRTC グリッド視聴</h1>
+  <a class="back" href="/">← トップ</a>
+  <label class="note">号機: <input id="ids" size="26" placeholder="KK01,KK02,…（空で全機）"></label>
+  <button id="reload">再構成</button>
+  <div class="spacer"></div>
+  <button id="connectAll">全接続</button>
+  <button id="disconnectAll">全切断</button>
+  <span class="note" id="hint"></span>
+</header>
+
+<div id="grid"></div>
+
+<script src="/static/endpoints.js"></script>
+<script src="/static/webrtc-camera.js"></script>
+<script>
+// ---- 設定の解決 -------------------------------------------------------------
+// ?ids=KK01,KK02 があればそれを使う。無ければ /api/units（= config/units.json の
+// pi_id）から全号機を引く。号機 ID をこのページに書き込まないための経路。
+const qs = new URLSearchParams(location.search);
+const SERVER = qs.get('server') || '';   // 空なら endpoints.js 由来の relay へ
+
+async function resolveIds() {
+  const raw = qs.get('ids');
+  if (raw) return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  try {
+    const res = await fetch('/api/units', { cache: 'no-store' });
+    const body = await res.json();
+    const units = body.units || {};
+    return Object.keys(units)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((n) => units[n].pi_id)
+      .filter(Boolean);
+  } catch (e) {
+    return [];
+  }
+}
+
+// ---- タイル管理 -------------------------------------------------------------
+const grid = document.getElementById('grid');
+const tiles = new Map(); // id -> { cam, video, statusEl, statsEl, tileEl }
+
+function labelOf(id) {
+  const m = id.match(/(\d+)\s*$/);
+  return m ? `${Number(m[1])}号機 (${id})` : id;
+}
+
+// 表示回転（表示側のみ・配信は横長のまま）。号機番号 → 時計回りの回転角（度）。
+// 現状 KK03 のみ 90 度。CSS の .tile.rot90 が実装。
+const UNIT_ROTATION = { 3: 90 };
+function rotationOf(id) {
+  const m = id.match(/(\d+)\s*$/);
+  return m ? (UNIT_ROTATION[parseInt(m[1], 10)] || 0) : 0;
+}
+
+function buildTile(id) {
+  const tile = document.createElement('div');
+  tile.className = 'tile' + (rotationOf(id) === 90 ? ' rot90' : '');
+  tile.innerHTML = `
+    <div class="vbox"><video autoplay playsinline muted></video></div>
+    <div class="bar">
+      <span class="name"></span>
+      <span class="status">未接続</span>
+      <span class="stats"></span>
+    </div>`;
+  tile.querySelector('.name').textContent = labelOf(id);
+  const video = tile.querySelector('video');
+  const statusEl = tile.querySelector('.status');
+  const statsEl = tile.querySelector('.stats');
+  grid.appendChild(tile);
+
+  const cam = new WebRTCCamera({
+    server: SERVER || undefined,
+    onStatus: (s) => {
+      if (s === 'connected') { statusEl.textContent = '● LIVE'; statusEl.className = 'status live'; }
+      else if (s === 'connecting') { statusEl.textContent = '接続中…'; statusEl.className = 'status'; }
+      else if (s.startsWith('error')) { statusEl.textContent = s.replace('error:', '⚠ '); statusEl.className = 'status err'; }
+      else { statusEl.textContent = '切断'; statusEl.className = 'status'; }
+    },
+    onStats: (st) => {
+      statsEl.textContent = `${st.width}x${st.height} ${st.kbps}kbps ${st.fps}fps`;
+    },
+  });
+
+  const rec = { cam, video, statusEl, statsEl, tileEl: tile };
+  tiles.set(id, rec);
+  return rec;
+}
+
+// ---- 接続 -------------------------------------------------------------------
+function connectAll() {
+  for (const [id, t] of tiles) t.cam.connect(t.video, id);
+}
+function disconnectAll() {
+  for (const t of tiles.values()) t.cam.disconnect();
+}
+
+async function rebuild() {
+  disconnectAll();
+  grid.innerHTML = '';
+  tiles.clear();
+  const ids = await resolveIds();
+  document.getElementById('ids').value = qs.get('ids') || '';
+  if (!ids.length) {
+    document.getElementById('hint').textContent = '号機一覧を取得できませんでした';
+    return;
+  }
+  ids.forEach(buildTile);
+  document.getElementById('hint').textContent =
+    `${ids.length} 機 / 映像は relay(WebRTC) から直接受信`;
+  connectAll();
+}
+
+// ---- UI 配線 ----------------------------------------------------------------
+document.getElementById('connectAll').onclick = connectAll;
+document.getElementById('disconnectAll').onclick = disconnectAll;
+document.getElementById('reload').onclick = () => {
+  const ids = document.getElementById('ids').value.trim();
+  const p = new URLSearchParams();
+  if (ids) p.set('ids', ids);
+  if (SERVER) p.set('server', SERVER);
+  location.search = p.toString();
+};
+
+rebuild();
+</script>
+</body>
+</html>

@@ -36,6 +36,10 @@
 </header>
 <video id="video" autoplay playsinline muted controls></video>
 
+<!-- control_ui(:8000) の /viewer/ から配信されたときに relay のポートを知るため。
+     relay 自身から配信された場合は 404 になるが、その場合は同一オリジン＝relay
+     なので webrtc-camera.js の既定値でそのまま繋がる。 -->
+<script src="/static/endpoints.js"></script>
 <script src="webrtc-camera.js"></script>
 <script>
 const video   = document.getElementById('video');

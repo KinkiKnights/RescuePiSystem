@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -822,8 +822,53 @@ async def webrtc_client_js() -> FileResponse:
     return FileResponse(WEBRTC_CLIENT_JS, media_type="application/javascript")
 
 
+# 号機マイクの集約ハブ（mic_hub）と WebRTC ビュワー（relay 同梱）の画面も、この
+# 8000 番から配信する。運用時に人が開く URL を一本化するため。実体のディレクトリを
+# そのままマウントし、ファイルの複製は持たない（CLAUDE.md 規約 1）。
+#
+# 配信するのは「画面」だけで、データ接続はプロキシしない。ブラウザは relay の
+# シグナリング（ws://…:8080/ws）や mic hub の状態・音声（http://…:8770/…）へ
+# 直接つなぐ。中継を挟まないので、PTT 音声や映像の経路に段が増えない。
+# 接続先のポートは config/units.json が単一の真実（規約 5）で、下の
+# /static/endpoints.js がそれを JS へ渡す。
+RELAY_WEB_DIR = REPO_ROOT / "server" / "webrtc_relay" / "web"
+MIC_HUB_STATIC_DIR = REPO_ROOT / "server" / "mic_hub" / "static"
+
+_ENDPOINT_KEYS = ("control_ui_port", "relay_port", "voice_port", "mic_hub_port")
+
+
+def server_endpoints() -> dict[str, Any]:
+    """units.json の server.* のうちポートだけを返す。
+
+    ホスト名は返さない。ブラウザは自分が開いているホスト（location.hostname）の
+    ポートだけ差し替えれば各サービスへ届くので、IP を JS へ渡す必要が無い。
+    """
+    cfg = UNITS_CONFIG.get("server") or {}
+    return {key: cfg[key] for key in _ENDPOINT_KEYS if key in cfg}
+
+
+@app.get("/api/endpoints")
+async def get_endpoints() -> dict[str, Any]:
+    """各サービスの待受ポート（units.json 由来）。"""
+    return server_endpoints()
+
+
+@app.get("/static/endpoints.js")
+async def endpoints_js() -> Response:
+    """ポート表を JS のグローバルへ流し込む小さなシム。
+
+    8000 から配信されるページはこれを読んでから relay / mic hub へ直接つなぐ。
+    ポート番号を JS 側に書き写さないための経路。/static のマウントより先に
+    登録することで、このパスだけ生成結果へ振り向ける。
+    """
+    body = "window.RESCUE_ENDPOINTS = " + json.dumps(server_endpoints(), ensure_ascii=False) + ";\n"
+    return Response(content=body, media_type="application/javascript")
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/voice", StaticFiles(directory=str(VOICE_DIR)), name="voice")
+app.mount("/viewer", StaticFiles(directory=str(RELAY_WEB_DIR), html=True), name="viewer")
+app.mount("/mic", StaticFiles(directory=str(MIC_HUB_STATIC_DIR), html=True), name="mic")
 
 
 async def broadcast(message: dict[str, Any], channel: str = "all") -> None:
@@ -890,6 +935,12 @@ async def control_panel_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "control-panel.html")
 
 
+@app.get("/grid")
+async def grid_page() -> FileResponse:
+    """全号機のカメラをタイル表示するグリッド視聴画面。"""
+    return FileResponse(STATIC_DIR / "grid.html")
+
+
 @app.on_event("startup")
 async def _start_ping_monitor() -> None:
     # ping 監視のバックグラウンドタスクを起動する。
@@ -912,13 +963,16 @@ async def get_units() -> dict[str, Any]:
     - connected: 採用アドレスの有無（＝いずれかの経路が live か）。
     - route_type: 採用経路の種別（11x=無線 / 13x=調整用WiFi / wired=有線 / mdns）。
     - candidates: 優先順の候補ごとに {addr, up(true/false/null=未確認), route_type}。
+    - pi_id: units.json の pi_id（KK0N）。号機 ID の単一の真実。
     """
+    cfg_units = UNITS_CONFIG.get("units") or {}
     units: dict[str, Any] = {}
     for n in sorted(UNIT_ADDRS):
         chosen = resolver.current.get(n)
         live = resolver.liveness.get(n, {})
         units[str(n)] = {
             "unit": n,
+            "pi_id": (cfg_units.get(str(n)) or {}).get("pi_id"),
             "addr": chosen,
             "connected": chosen is not None,
             "route_type": _route_type(chosen),
