@@ -94,7 +94,6 @@
         <a class="index-link" href="/grid">WebRTC グリッド<small>全カメラ一覧</small></a>
         <a class="index-link" href="/viewer/">WebRTC ビュワー<small>1 号機ずつ視聴</small></a>
         <a class="index-link" href="/mic/">マイク集約ハブ<small>号機マイクの状態・試聴</small></a>
-        <a class="index-link" id="autoControlLink" href="#" target="_blank" rel="noopener">フィールド情報入力・監視画面（自動探索・デバッグ）<small>5号機 自律探索</small></a>
         <a class="index-link" href="/all-monitor">4K オールモニタ<small>2×2 統合モニタ</small></a>
         <a class="index-link" href="/control-panel">コントロールパネル<small>統合切替操作</small></a>
       </nav>
@@ -109,7 +108,6 @@
     </div>
   </div>
   <script>
-    document.getElementById('autoControlLink').href = location.protocol + '//' + location.hostname + ':8092/?debug';
     // Res26 コントロールシステムは別ポートの独立アプリ。ポートは /api/endpoints
     // が返す res26_port（main.py の RES26_PORT が単一の真実）を使う。
     fetch('/api/endpoints', { cache: 'no-store' })
