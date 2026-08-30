@@ -150,6 +150,22 @@ git clone --recursive git@github.com:KinkiKnights/RescuePiSystem.git ~/kk_ws/src
 
 詳細は [docs/robot.md](docs/robot.md)（号機）と [docs/operations.md](docs/operations.md)（kkrtx）。
 
+kkrtx を**常駐させずに**使う場合（競技や試験のときだけ立ち上げる運用）は、
+`kkrtx_setup.sh` を `SETUP_SERVICES=0` で実行して依存導入と relay のビルドだけ
+済ませ、4 サービスの起動・停止は `deploy/server/server_ctl.sh` で行う。
+
+```bash
+SETUP_SERVICES=0 ~/kk_ws/src/RescuePiSystem/deploy/server/kkrtx_setup.sh
+~/kk_ws/src/RescuePiSystem/deploy/server/server_ctl.sh start    # stop / restart / status / logs
+```
+
+systemd 常駐と `server_ctl.sh` を**同時に使わないこと**（ポートが衝突する）。
+
+ディスク容量に応じた `MIC_HUB_MAX_GB` など**機体ごとの運用値**は
+`~/.config/rescue-pi/server.env` に置く（リポジトリ外・git 管理外）。優先順位は
+コマンドライン > `server.env` > スクリプト既定値。
+詳細は [docs/operations.md](docs/operations.md)。
+
 ## ドキュメント
 
 | 文書 | 内容 |
