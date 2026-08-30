@@ -871,6 +871,50 @@ app.mount("/viewer", StaticFiles(directory=str(RELAY_WEB_DIR), html=True), name=
 app.mount("/mic", StaticFiles(directory=str(MIC_HUB_STATIC_DIR), html=True), name="mic")
 
 
+# ---- 大会固有画面（リポジトリ外のディレクトリを /op に配信する）--------------
+#  大会ごとの画面を main.py や index.html に足していくと、大会が変わるたびに分岐が
+#  溜まる。そこで「汎用プラットフォーム層＝このリポジトリ」「大会固有画面＝別
+#  リポジトリ」に分け、後者は OP_SCREENS_DIR が指すディレクトリを /op へそのまま
+#  静的配信する（設定は ~/.config/rescue-pi/server.env の 1 行。規約 6）。
+#
+#  層の契約: 大会固有画面は **静的な HTML/JS/CSS だけ**。バックエンドの追加を
+#  要求しない。既に公開している /api/* と /ws/{role}、共有アセットの /static/* と
+#  /voice/* を叩いて作る。新しい API が要るなら、それはもう大会固有ではなく汎用
+#  機能なので、このリポジトリ側に入れる。Python を読み込むプラグイン機構は作らない
+#  （任意コード実行の入口を増やさないため）。
+#
+#  大会画面リポジトリは自分のルートに index.html を置き、その中のサブ画面への
+#  ナビゲーションも自前で持つ。control_ui から張るリンクは /op/ の 1 本だけ。
+#
+#  未設定なら何もしない（/op は 404 のまま。既存環境は完全に無変更）。設定が
+#  壊れていてもマウントを飛ばすだけにする。ここで例外を投げると 8000 番の本体ごと
+#  起動しなくなり、大会当日にいちばん困るため。
+OP_SCREENS_DIR = (os.environ.get("OP_SCREENS_DIR") or "").strip()
+
+
+def _mount_op_screens(raw_path: str) -> None:
+    if not raw_path:
+        return                     # 未設定。/op は生やさない
+    base = Path(raw_path)
+    if not base.is_absolute():
+        print(f"[op] OP_SCREENS_DIR は絶対パスで指定してください（/op は無効）: {raw_path}")
+        return
+    if not base.exists():
+        print(f"[op] OP_SCREENS_DIR が存在しません（/op は無効）: {base}")
+        return
+    if not base.is_dir():
+        print(f"[op] OP_SCREENS_DIR がディレクトリではありません（/op は無効）: {base}")
+        return
+    if not os.access(base, os.R_OK | os.X_OK):
+        print(f"[op] OP_SCREENS_DIR を読めません（/op は無効）: {base}")
+        return
+    app.mount("/op", StaticFiles(directory=str(base), html=True), name="op")
+    print(f"[op] /op/ -> {base}")
+
+
+_mount_op_screens(OP_SCREENS_DIR)
+
+
 async def broadcast(message: dict[str, Any], channel: str = "all") -> None:
     payload = json.dumps(message, ensure_ascii=False)
     targets: set[WebSocket] = set()
