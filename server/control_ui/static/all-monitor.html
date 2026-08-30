@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>4K オールモニタ</title>
-  <link rel="stylesheet" href="/static/common.css" />
+  <link rel="stylesheet" href="/static/base.css" />
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
     .grid2x2 {
@@ -38,15 +38,24 @@
       <iframe src="/ping-monitor" title="Ping モニター"></iframe>
     </div>
     <div class="cell">
-      <iframe src="/master" title="マスターモード"></iframe>
+      <iframe title="マスターモード"></iframe>
     </div>
     <div class="cell">
       <iframe src="/control-panel" title="コントロールパネル"></iframe>
     </div>
   </div>
   <script>
-    // グリッドは control_ui 自身が /grid で配信する（同一オリジン）。
+    // グリッドは汎用ツール自身が /grid で配信する（同一オリジン）。
     document.getElementById('cellGrid').src = '/grid';
+    // マスターモードは Res26 コントロールシステム（別ポートの独立アプリ）にある。
+    // ポートは /api/endpoints の res26_port（main.py の RES26_PORT が単一の真実）。
+    fetch('/api/endpoints', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (e) {
+        document.querySelector('iframe[title="マスターモード"]').src =
+          location.protocol + '//' + location.hostname + ':' + e.res26_port + '/master';
+      })
+      .catch(function () {});
   </script>
 </body>
 </html>

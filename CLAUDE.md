@@ -15,21 +15,25 @@
    WebRTC (publisher ⇔ relay ⇔ ブラウザ)、joy (control_ui ⇔ joy_node_web)、
    master_control API (control_ui ⇔ 号機) はすべて同一リポジトリ内にある。
    契約は `docs/protocols/` に書く。
-3. **外部にあるのは 4 つだけ**: `joy_node_web` / `ros2_socketcan` / `gm6020_control`
+3. **大会固有の操作画面は別リポジトリ `res26_control_ui`**（kkrtx のポート 8001 で
+   独立起動）。このリポジトリには号機まわりの**汎用ツール**だけを置く。大会ごとの
+   画面・状態・進行ロジックをここへ足さないこと。両者は互いに依存せず、片方だけ
+   でも動く（そのため一部ファイルを意図的に複製している。向こうの README を参照）。
+4. **外部にあるのは 4 つだけ**: `joy_node_web` / `ros2_socketcan` / `gm6020_control`
    (いずれも `robot/ros2/` 配下の **submodule**。固定コミット参照)と
    `damiyan-signal-processing`(契約は `docs/protocols/damiyan.md`)。増やさない。
    外部の ROS 2 パッケージは**ベンダリング(ファイルの直接コピー)をしない**。
    上流 OSS も含めて submodule にし、どの版を積んでいるかを gitlink の SHA で示す。
-4. **systemd ユニットは `deploy/systemd/*.service.in` が単一の真実。**
+5. **systemd ユニットは `deploy/systemd/*.service.in` が単一の真実。**
    実 `.service` はコミットせず、`install_unit`（`deploy/systemd/install_unit.sh`）で
    展開・設置する。スクリプト内にユニット本文を書き写さない。
-5. **アドレス・ポートは `config/units.json`。** コードやスクリプトに IP を直書きしない。
+6. **アドレス・ポートは `config/units.json`。** コードやスクリプトに IP を直書きしない。
    **号機 ID は `KK0N` に統一**（`units[n].pi_id` / camera_publisher の `PI_ID` /
    操作画面が購読する ID / relay の `/pis` がすべて同じ文字列になる）。
    `RES0N` や `PI0N` といった別系統の ID を新たに作らない。
-6. **号機ごとの運用値は `/etc/default/*` か `devices.json`。** リポジトリ内の
+7. **号機ごとの運用値は `/etc/default/*` か `devices.json`。** リポジトリ内の
    設定ファイルに書くと `git pull` で差分が巻き戻る（`programs.json` で実際に起きた）。
-7. **カメラ / マイクのデバイス指定を `programs.json` の `cmd` に埋め込まない。**
+8. **カメラ / マイクのデバイス指定を `programs.json` の `cmd` に埋め込まない。**
    `robot/device_config.py` の設定（`~/.config/rescue-pi/devices.json`）が持ち、
    master_control が環境変数として渡す。デバイスは番号（`/dev/video0`,
    `hw:1,0`）ではなく**安定 ID**（`/dev/v4l/by-id/...`, `hw:CARD=<名前>,DEV=0`）で

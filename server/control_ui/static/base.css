@@ -1,0 +1,195 @@
+/* base.css — 全画面共通の土台（カラートークン・リセット・.app / .btn / .modal）
+ *
+ * 汎用ツール側（index / ping-monitor / all-monitor / control-panel）と
+ * Res26 コントロールシステム側（別リポジトリ res26_control_ui・ポート 8001）の
+ * 両方が使う。**両者は独立して動く方針なので、このファイルは res26_control_ui
+ * にも同じ内容が複製されている。**片方を直したらもう片方も直すこと。
+ *   複製先: res26_control_ui/static/base.css
+ */
+:root {
+  --bg: #2a2a2e;
+  --surface: #35353a;
+  --surface2: #3f3f45;
+  --border: #ffffff;
+  --text: #ffffff;
+  --muted: #b8b8bc;
+  --accent: #5b9bd5;
+  --ok: #6fcf6f;
+  --warn: #e8943a;
+  --danger: #e85d5d;
+  --header-h: 48px;
+  --font: "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.app-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--header-h);
+  padding: 0 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.app-header__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.app-header__meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: center;
+}
+
+.btn {
+  transition: background 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+.btn:hover {
+  background: #4a4a52;
+  border-color: var(--accent);
+  box-shadow: 0 0 10px 2px rgba(91, 155, 213, 0.75), inset 0 0 6px rgba(91, 155, 213, 0.35);
+}
+
+.btn:active {
+  background: #55555e;
+}
+
+.btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal {
+  width: min(520px, 92vw);
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.modal__head {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+.modal__head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.modal__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.modal__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.modal__item {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.modal__item:hover,
+.modal__item.is-selected {
+  background: var(--surface2);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.modal__item kbd {
+  display: inline-block;
+  min-width: 1.2rem;
+  margin-right: 0.5rem;
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  text-align: center;
+}
+
+.modal__confirm {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--warn);
+  text-align: center;
+}
+
+.modal__confirm[hidden] {
+  display: none;
+}

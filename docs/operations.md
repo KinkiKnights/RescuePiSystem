@@ -22,41 +22,55 @@ systemctl status mic-hub
 
 追加パッケージは不要（Python 標準ライブラリのみ）。
 
-### 8000（control_ui）から開ける画面
+### 画面の置き場所（8000 の汎用ツール / 8001 の Res26）
 
-運用中にブラウザで開く URL は **control_ui の 1 つに集約**してある。
-`http://<kkrtx>/`（`server_ctl.sh` で手動起動している場合は `:8000`）を開けば、
-トップからすべての画面へ辿れる。
+操作画面は **2 つの独立したアプリ**に分かれている。**どちらか一方だけが起動して
+いても、それぞれが完全に機能する。**
+
+**汎用ツール（`server/control_ui`・ポート 80 または 8000）** — 号機まわりの、大会に
+依存しない道具。
 
 | パス | 画面 | 実体 |
 |---|---|---|
-| `/` | トップ（全画面へのリンク） | `control_ui/static/index.html` |
-| `/control` `/analytics` `/engineer` `/reporter` `/master` | 操作画面 5 モード | `control_ui/static/` |
-| `/ping-monitor` `/all-monitor` `/control-panel` | 監視・統合画面 | 同上 |
-| `/grid` | WebRTC グリッド視聴（全号機のカメラをタイル表示） | `control_ui/static/grid.html` |
+| `/` | トップ（全ツールへのリンク） | `control_ui/static/index.html` |
+| `/ping-monitor` | Ping モニター | `control_ui/static/` |
+| `/all-monitor` | 4K オールモニタ（2×2 統合） | 同上 |
+| `/control-panel` | コントロールパネル（外部ツールへのランチャ） | 同上 |
+| `/grid` | WebRTC グリッド視聴（全号機のカメラ） | 同上 |
 | `/viewer/` | WebRTC ビュワー（1 号機ずつ） | `webrtc_relay/web/`（relay と同一実体） |
 | `/mic/` | マイク集約ハブの状態・試聴 | `mic_hub/static/`（hub と同一実体） |
 
-`/viewer/` と `/mic/` は**マウントしているだけでファイルは複製していない**（規約 1）。
+API は `/api/units`（号機の経路解決）・`/api/ping/*`・`/api/unit/*`（号機の電源）・
+`/api/endpoints`（ポート表）。
 
-**プロキシは挟んでいない。** 8000 が配るのは HTML/JS/CSS だけで、データ接続は
-ブラウザから各サービスへ直接行く:
+**Res26 コントロールシステム（別リポジトリ `res26_control_ui`・ポート 8001）** —
+競技用の操作画面 5 モード（`/control` `/analytics` `/engineer` `/reporter` `/master`）と、
+その状態管理・WebSocket 配信・damiyan 検出器の制御。起動は向こうの
+`res26_ctl.sh`（`server_ctl.sh` は関与しない）。
 
-- WebRTC のシグナリング → `ws://<kkrtx>:8080/ws`（映像そのものは WebRTC の
-  UDP を直接流れる。relay は SFU なので 8080 は通らない）
+汎用ツール側の旧 URL（`/control` など）は **302 で 8001 へ転送**する。ブックマークが
+そのまま生きるようにしてあるが、恒久キャッシュを避けるため 301 ではなく 302。
+
+**プロキシは挟んでいない。** 画面が配られるのは 8000 か 8001 のどちらかで、データ
+接続はブラウザから各サービスへ直接行く:
+
+- WebRTC のシグナリング → `ws://<kkrtx>:8080/ws`（映像そのものは WebRTC の UDP を
+  直接流れる。relay は SFU なので 8080 は通らない）
 - マイクの状態と試聴 → `http://<kkrtx>:8770/api/status`, `/listen/<unit>`
 - PTT 音声 → `ws://<kkrtx>:8766/voice`
+- 号機の再起動・シャットダウン → 汎用側は `/api/unit/*` 経由、Res26 の画面は
+  号機の `http://<号機IP>/system/reboot|shutdown` を直接叩く
 
-中継を挟まないので、映像・音声の遅延に段が増えない。**そのため 8080 / 8766 / 8770
-のサービスは 8000 とは別に動かし続ける必要がある**（`server_ctl.sh start` は 4 つ
-まとめて起動する）。機体側の接続先（`ws://…:8080/ws` と
-`http://…:8770/ingest/<unit>`）も従来のままで、号機の設定変更は要らない。
+そのため 8080 / 8766 / 8770 のサービスは 8000・8001 とは別に動かし続ける必要がある。
+機体側の接続先（`ws://…:8080/ws` と `http://…:8770/ingest/<unit>`）は分離前から
+変わっていないので、号機の設定変更は要らない。
 
-接続先のポートは `config/units.json` の `server.*` が単一の真実（規約 5）。
-control_ui が `/api/endpoints`（JSON）と `/static/endpoints.js`
-（`window.RESCUE_ENDPOINTS` を定義する小さなシム）で JS へ渡すので、
-**画面側のコードにポート番号を書かない**。ポートを変えるときは `units.json`
-だけを直す。
+ポートは `config/units.json` の `server.*` が単一の真実（規約 5）。control_ui が
+`/api/endpoints`（JSON）と `/static/endpoints.js`（`window.RESCUE_ENDPOINTS` を定義
+するシム）で JS へ渡すので、画面側のコードにポート番号を書かない。Res26 の
+ポート（8001）だけは号機が知る必要のない大会固有の値なので `units.json` には書かず、
+`server/control_ui/main.py` の `RES26_PORT` を単一の真実として `/api/endpoints` に
+混ぜている。
 
 ### 4 サービスをまとめて起動・停止する（常駐させない運用）
 
@@ -120,34 +134,6 @@ MIC_HUB_MAX_GB=2 ./deploy/server/server_ctl.sh start mic_hub # --max-gb 2 (コ�
 （`MIC_HUB_MAX_GB` は号機ごとの上限なので、既定の 8GB は事実上この保持時間の側で
 決まる量に張り付く）。1GB/号機なら 5 号機でも 5GB に収まる。**この値は kkrtx の
 ディスク事情に由来するものなので、リポジトリ内の既定値（8GB）は変えていない。**
-
-#### 大会固有の画面は `OP_SCREENS_DIR` で外から挿す
-
-大会ごとの画面を `control_ui` に足していくと、大会が変わるたびに `main.py` と
-`index.html` に分岐が溜まる。そこで **汎用プラットフォーム層＝このリポジトリ /
-大会固有画面＝別リポジトリ** に分け、後者は `server.env` の 1 行で場所を教える。
-
-```bash
-$ cat ~/.config/rescue-pi/server.env
-MIC_HUB_MAX_GB=1
-OP_SCREENS_DIR=/home/kk/kk_mft_ws/src/rescue_screens_mft26
-```
-
-`control_ui` はこのディレクトリを **`/op`** に静的配信する。操作画面のトップからは
-`/op/` へのリンクが 1 本だけ張ってある。大会画面リポジトリは**自分のルートに
-`index.html` を置き、その中のサブ画面へのナビゲーションも自前で持つ**。
-
-**未設定なら何も起きない**（`/op` は 404 になるだけで、既存の画面は完全に無変更）。
-設定はしたがパスが存在しない・ディレクトリでない・読めない・相対パスだった場合は、
-**警告を出してマウントを飛ばすだけ**で `control_ui` は正常に起動する。8000 番は
-操作画面の本体なので、設定ミスで起動しなくなることが無いようにしてある。
-
-**層の契約: 大会固有画面は静的な HTML/JS/CSS だけ。** バックエンドの追加を要求
-しない。`control_ui` が公開している `/api/*` と `/ws/{role}`、共有アセットの
-`/static/*`（`webrtc-camera.js` / `endpoints.js`）と `/voice/*` を叩いて作る。
-**新しい API が必要になったら、それはもう大会固有ではなく汎用機能**なので、この
-リポジトリ側に入れる — というのが層を分ける判定基準になる。Python を読み込む
-プラグイン機構は用意しない（任意コード実行の入口を増やさないため）。
 
 **操作画面のポートに注意。** systemd ユニットは `AmbientCapabilities=CAP_NET_BIND_SERVICE`
 を持つので一般ユーザのまま port 80 に bind できるが、手で起動する場合それが無い。

@@ -1,4 +1,9 @@
-"""レスキューロボコン ダミー操作画面 — FastAPI サーバー"""
+"""レスキューロボコン 汎用ツール — FastAPI サーバー
+
+号機まわりの汎用ツールだけを持つ。競技（Res26）の操作画面と状態管理は
+res26_control_ui（別リポジトリ・ポート 8001）へ分離した。
+ここに大会固有のロジックを足さないこと。
+"""
 
 from __future__ import annotations
 
@@ -6,18 +11,17 @@ import asyncio
 import json
 import os
 import platform
-import shlex
 import subprocess
 import time
 import urllib.error
 import urllib.request
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -32,106 +36,6 @@ PING_CONFIG_PATH = Path(
 # 自己署名証明書はリポジトリ直下の certs/ に置き、control_ui と voice_comm で共有する
 # （make_cert.py が生成。git 管理外）。
 CERT_DIR = Path(os.environ.get("RESCUE_CERT_DIR") or REPO_ROOT / "certs")
-
-GROUP_TASK_NAMES = ["現着", "音声解析", "QR解析", "顔色", "搬送"]
-
-
-def _parse_norm_coord(coord: Any) -> dict[str, float] | None:
-    """暗室座標ペイロードを検証して正規化座標へ整形する。
-
-    受理: {"x": num, "y": num}（x,y ともに 0..1 の実数）→ float 化した dict。
-    それ以外（型不正・範囲外・bool 等）は None を返す（＝不正として拒否）。
-    ※ None を「クリア」と区別するため、呼び出し側は coord is None を先に判定する。
-    """
-    if not isinstance(coord, dict):
-        return None
-    x = coord.get("x")
-    y = coord.get("y")
-    # bool は int のサブクラスなので明示的に除外する
-    if isinstance(x, bool) or isinstance(y, bool):
-        return None
-    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-        return None
-    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
-        return None
-    return {"x": float(x), "y": float(y)}
-
-
-# ===== 5号機 自動走行（暗室座標を目標に joy_node_web へ set_goal / cancel_goal） =====
-# フィールドは 1800×1800mm の正方形。暗室座標は 0..1 正規化（左上=(0,0)・右下=(1,1)、
-# nx=右方向・ny=下方向）。目標コマンドはメートル・map フレームで送る。
-# 座標系は robot/ros2/joy_node_web/docs/COMMUNICATION_SPEC.md「4. 座標系」に従う。
-FIELD_SIZE_M = 1.8  # 1800mm
-
-# ロボットへコマンドを送る WebSocket（既存の joy 接続と同一 = ws://<ip>:8700/joys）
-ROBOT_WS_PORT = 8700
-ROBOT_WS_PATH = "joys"
-
-
-def _dark_room_goal(
-    coord: dict[str, float],
-    field_side: str | None,
-    offset: dict[str, float] | None = None,
-) -> dict[str, Any]:
-    """正規化暗室座標(0..1) を joy_node_web の set_goal 用フィールド座標[m]へ変換する。
-
-    COMMUNICATION_SPEC.md「4. 座標系」より:
-      - 青フィールド: 原点=左上, X=下向き正, Y=右向き正 → x = ny*1.8, y = nx*1.8
-      - 赤フィールド: 原点=右上, X=下向き正, Y=左向き正 → x = ny*1.8, y = (1-nx)*1.8
-    暗室座標には向き情報が無いため yaw=0.0（要確認）。field_side 未選択時は
-    青(左上原点)の規約で暫定変換する（運用側で map フレーム基準を確定すること）。
-
-    原点校正用オフセット（マスターが field_side ごとに設定・単位は map[m] 想定）を
-    加算する。符号規約はユーザー指定の「下向き +・右向き −」:
-      - offset["x"] = 下方向オフセット（下が +）→ goal x（下方向正）へ **加算**。
-      - offset["y"] = 右方向オフセット（右が −）→ goal y（右方向）へ **減算**。
-        すなわち正値=左へ / 負値=右へずらす。
-    ※ 赤フィールドは内部 y 軸が (1-nx) で左向き正のため、右方向オフセットの向きは
-      要確認（暫定で青と同じく減算＝左寄せとして扱う）。
-    """
-    nx = float(coord["x"])
-    ny = float(coord["y"])
-    ox = 0.0
-    oy = 0.0
-    if isinstance(offset, dict):
-        try:
-            ox = float(offset.get("x", 0.0))
-            oy = float(offset.get("y", 0.0))
-        except (TypeError, ValueError):
-            ox = oy = 0.0
-    gx = ny * FIELD_SIZE_M + ox  # 下向き +
-    if field_side == "red":
-        gy = (1.0 - nx) * FIELD_SIZE_M - oy  # 右向き −
-    else:
-        gy = nx * FIELD_SIZE_M - oy  # 右向き −（青／未選択）
-    return {"x": round(gx, 4), "y": round(gy, 4), "yaw": 0.0, "frame_id": "map"}
-
-
-async def _send_robot_command(ip: str, payload: dict[str, Any]) -> bool:
-    """号機の joy_node_web（ws://<ip>:8700/joys）へコマンド JSON を 1 回送信する。
-
-    COMMUNICATION_SPEC.md「2.2 コマンド」に準拠（`command` フィールドで種別指定）。
-    エッジトリガのため接続→送信→切断する。IP 未設定・接続失敗・ライブラリ不在時は
-    False を返し、サーバー起動は妨げない（ログに理由を残す）。
-    """
-    if not ip:
-        print("[AUTO-RUN] 5号機 IP が未設定のためコマンドを送信できません（config.json 要確認）。")
-        return False
-    try:
-        import websockets  # uvicorn[standard] 同梱。無ければ送信をスキップ。
-    except ImportError:
-        print("[AUTO-RUN] websockets ライブラリが無いためロボット送信をスキップしました（要確認）。")
-        return False
-
-    url = f"ws://{ip}:{ROBOT_WS_PORT}/{ROBOT_WS_PATH}"
-    try:
-        async with websockets.connect(url, open_timeout=2, close_timeout=2) as ws:
-            await ws.send(json.dumps(payload, ensure_ascii=False))
-        print(f"[AUTO-RUN] 送信成功 {url} ← {payload}")
-        return True
-    except Exception as exc:
-        print(f"[AUTO-RUN] 送信失敗 {url}（{exc}）。ロボット未接続の可能性。")
-        return False
 
 
 def load_units_config() -> dict[str, Any]:
@@ -545,23 +449,17 @@ async def _ping_or_false(ip: str, timeout_sec: float) -> bool:
         return False
     return await _ping_once(ip, timeout_sec)
 
-
 async def _units_ping_loop() -> None:
-    """各号機の候補アドレスを優先順に probe し、live 経路を自動選択して配信する経路選択器。
+    """各号機の候補アドレスを優先順に probe し、live 経路を自動選択する経路選択器。
 
-    - 各号機の候補配列を並行 probe(probe_timeout_sec)して生死表を作り、resolver で現用
-      アドレスを決める（sticky=true の間は現用が live な限り切替えない＝再接続を避ける）。
-    - 選択結果を state.units[n].connected（手動 disabled 中は上書きしない）と、状態配信用
-      の state.unit_ips[n]（採用済み単一アドレス。フロントは既存の IP 変化検知で追随）へ
-      反映する。live 経路が無い号機は connected=false・採用アドレスは直近値を維持する。
-    - connected もしくは採用アドレスに変化があったときのみ全クライアントへ配信する。
+    - 各号機の候補配列を並行 probe(probe_timeout_sec)して生死表を作り、resolver で
+      現用アドレスを決める（sticky=true の間は現用が live な限り切替えない）。
+    - 結果は resolver に持たせ、/api/units がそれを返す。
     - ループ間隔は resolve.probe_interval_sec、probe タイムアウトは probe_timeout_sec。
-    - _default_units の connected(i!=2) は初期値のみで、起動後は実 probe が権威となる。
     """
     interval = float(RESOLVE_CONFIG["probe_interval_sec"])
     timeout = float(RESOLVE_CONFIG["probe_timeout_sec"])
     while True:
-        # 号機ごとに全候補を並行 probe して生死表を作る（現用選択にも API 表示にも使う）。
         units = sorted(UNIT_ADDRS)
         probe_jobs: list[tuple[int, str]] = [
             (n, a) for n in units for a in UNIT_ADDRS[n]
@@ -573,241 +471,21 @@ async def _units_ping_loop() -> None:
         for (n, a), ok in zip(probe_jobs, probe_results):
             live_by_unit[n][a] = bool(ok)
 
-        changed = False
-        async with state.lock:
-            for n in units:
-                live = live_by_unit[n]
-                chosen = resolver.choose(n, live)
-                resolver.liveness[n] = {a: live.get(a) for a in UNIT_ADDRS[n]}
-                resolver.current[n] = chosen
-                u = state.units.get(n)
-                if u is None or u.get("disabled"):
-                    continue
-                online = chosen is not None
-                if u.get("connected") != online:
-                    u["connected"] = online
-                    changed = True
-                # 採用済み単一アドレスを配信用に反映（live 経路が無ければ直近値を維持）。
-                if chosen and state.unit_ips.get(n) != chosen:
-                    state.unit_ips[n] = chosen
-                    changed = True
-            resolver.updated = time.time()
-        if changed:
-            snap = state.snapshot()
-            await broadcast({"type": "state", "payload": snap})
+        for n in units:
+            live = live_by_unit[n]
+            resolver.current[n] = resolver.choose(n, live)
+            resolver.liveness[n] = {a: live.get(a) for a in UNIT_ADDRS[n]}
+        resolver.updated = time.time()
         await asyncio.sleep(max(1.0, interval))
 
-
-def _default_tasks() -> list[dict[str, Any]]:
-    tasks: list[dict[str, Any]] = [
-        {"id": 1, "text": "ブレーカー", "room": None, "done": False},
-        {"id": 2, "text": "天カメ展開", "room": None, "done": False},
-    ]
-    for r_idx, room in enumerate(["A", "B", "C"]):
-        for t_idx, name in enumerate(GROUP_TASK_NAMES):
-            tasks.append(
-                {
-                    "id": (r_idx + 1) * 10 + t_idx + 1,
-                    "text": name,
-                    "room": room,
-                    "done": False,
-                }
-            )
-    return tasks
-
-
-DEFAULT_TASKS = _default_tasks()
-
-DEFAULT_ANALYSIS = {
-    "stove": "",
-    "injury": "",
-    "color": "",
-    "audio": "",
-    "pattern": "",
-    "notes": "",
-    "status": "待機中",
-}
-
-
-def _default_room_analysis() -> dict[str, dict[str, Any]]:
-    return {
-        r: {
-            "stove": "",
-            "stoveDone": False,
-            "qr": "",
-            "injuryDone": False,
-            "color": "",
-            "colorDone": False,
-            "notes": "",
-            # 鳴動パターン：12 マスの ON/OFF を "0"/"1" の 12 文字で保持
-            # （左 3 マスは UI 上選択不可で常に "0"）。
-            "pattern": "",
-            # 周波数：damiyan の監視周波数（初期 8 個、frequencies.json）から選択した値（Hz、文字列）
-            "freq": "",
-            # 鳴動パターン・周波数の結果確定フラグ（stoveDone 等と同じ確定ゲート）
-            "patternDone": False,
-        }
-        for r in ("A", "B", "C")
-    }
-
-
-def _default_units() -> dict[int, dict[str, Any]]:
-    methods = ["WiFi", "TPIP", "WiFi", "TPIP", "WiFi"]
-    delays = [32, 48, 55, 41, 67]
-    return {
-        i: {
-            "unit": i,
-            "delay_ms": delays[i - 1],
-            "connected": i != 2,
-            "method": methods[i - 1],
-            "disabled": False,
-            # 号機ごとの自動QR検出（アナリティクスの各映像スキャナが確定ゲート無しで
-            # 随時共有する）。room_analysis[room].qr（確定ゲート付き＝解析者が確定）
-            # とは別系統で、各号機の映像から現在/直近に読めた QR をそのまま持つ。
-            "qr": "",            # 直近/現在検出した QR テキスト（未検出は ""）
-            "qr_ts": 0,          # 最終更新のエポックミリ秒（未検出は 0・Date.now 互換）
-            "qr_active": False,  # 現在検出保持中か（保持タイマ内は True）
-        }
-        for i in range(1, 6)
-    }
-
-
-class AppState:
-    def __init__(self) -> None:
-        # 操縦画面の機体選択（旧 control_video_unit / control_operating_unit）は
-        # クライアントローカルへ移行済み。サーバー共有状態には持たない。
-        self.analytics_target_unit: int = 1
-        self.notification: dict[str, Any] = {
-            "text": "",
-            "active": False,
-            "timestamp": 0,
-        }
-        self.tasks: list[dict[str, Any]] = deepcopy(DEFAULT_TASKS)
-        self.units: dict[int, dict[str, Any]] = _default_units()
-        self.room_units: dict[str, int] = {"A": 4, "B": 3, "C": 5}
-        self.room_analysis: dict[str, dict[str, Any]] = _default_room_analysis()
-        # 映像ソースは WebRTC(機体上カメラ中継)のみ。
-        # WebRTC中継サーバー(空ならクライアントが ws://<host>:8080/ws を自動推定)
-        self.webrtc_server: str = ""
-        self.analysis: dict[str, str] = deepcopy(DEFAULT_ANALYSIS)
-        self.master_overlay: dict[str, Any] = {
-            "visible": False,
-            "title": "",
-            "lines": [],
-        }
-        self.analysis_request: dict[str, Any] = {
-            "pending": False,
-            "unit": 0,
-            "timestamp": 0,
-        }
-        self.control_request: dict[str, Any] = {
-            "pending": False,
-            "unit": 0,
-            "timestamp": 0,
-        }
-        # 号機 IP は config.json 由来の固定設定（クライアントからは変更不可）
-        self.unit_ips: dict[int, str] = dict(UNIT_IPS)
-        # 暗室座標（エンジニアがマップ上をクリックして指定・全モードで共有）。
-        # None=未設定。値は {"x": float, "y": float}（マップ表面に対する 0..1 正規化座標）。
-        self.dark_room_coord: dict[str, float] | None = None
-        # フィールド陣営（マスターが選択・全モードで共有）。
-        # None=未選択、"red"=赤フィールド（入口＝右辺下半分）、"blue"=青フィールド（入口＝左辺下半分）。
-        self.field_side: str | None = None
-        # 暗室座標オフセット（マスターが field_side ごとに設定・全モード共有）。
-        # 正規化暗室座標→map[m] 変換時の原点校正。符号規約: 下向き +・右向き −（単位 map[m] 想定）。
-        # {"red": {"x": 下方向, "y": 右方向}, "blue": {...}}。既定は全 0（無校正）。
-        self.dark_room_offset: dict[str, dict[str, float]] = {
-            "red": {"x": 0.0, "y": 0.0},
-            "blue": {"x": 0.0, "y": 0.0},
-        }
-        # 5号機 自動走行の状態（サーバー権威・全モード共有）。
-        # "off"=消灯（既定）/ "armed"=点滅（暗室座標が入力/変更された）/ "lit"=点灯（自動走行中）。
-        self.unit5_auto_run: str = "off"
-        # ルーム別の周波数候補（12 個・Hz）。reporter が入力し、damiyan 検出器の
-        # 設定ファイル書き出し＋プロセス再起動で反映する。空リスト=未入力。
-        self.room_frequencies: dict[str, list[float]] = {"A": [], "B": [], "C": []}
-        self.lock = asyncio.Lock()
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "analytics_target_unit": self.analytics_target_unit,
-            "notification": dict(self.notification),
-            "tasks": deepcopy(self.tasks),
-            "units": deepcopy(self.units),
-            "room_units": dict(self.room_units),
-            "room_analysis": deepcopy(self.room_analysis),
-            "webrtc_server": self.webrtc_server,
-            "analysis": dict(self.analysis),
-            "master_overlay": deepcopy(self.master_overlay),
-            "analysis_request": dict(self.analysis_request),
-            "control_request": dict(self.control_request),
-            "unit_ips": {str(k): v for k, v in self.unit_ips.items()},
-            "dark_room_coord": (
-                dict(self.dark_room_coord) if self.dark_room_coord else None
-            ),
-            "field_side": self.field_side,
-            "dark_room_offset": {
-                side: dict(v) for side, v in self.dark_room_offset.items()
-            },
-            "unit5_auto_run": self.unit5_auto_run,
-            "room_frequencies": {r: list(v) for r, v in self.room_frequencies.items()},
-        }
-
-    async def push_notification(self, text: str) -> None:
-        async with self.lock:
-            self.notification = {
-                "text": text,
-                "active": True,
-                "timestamp": time.time(),
-            }
-
-    async def clear_notification_pulse(self) -> None:
-        async with self.lock:
-            if self.notification["active"]:
-                self.notification = {
-                    **self.notification,
-                    "active": False,
-                }
-
-    def reset(self) -> None:
-        self.analytics_target_unit = 1
-        self.notification = {"text": "", "active": False, "timestamp": 0}
-        self.tasks = deepcopy(DEFAULT_TASKS)
-        self.units = _default_units()
-        self.room_units = {"A": 4, "B": 3, "C": 5}
-        self.room_analysis = _default_room_analysis()
-        self.webrtc_server = ""
-        self.analysis = deepcopy(DEFAULT_ANALYSIS)
-        self.master_overlay = {"visible": False, "title": "", "lines": []}
-        self.analysis_request = {"pending": False, "unit": 0, "timestamp": 0}
-        self.control_request = {"pending": False, "unit": 0, "timestamp": 0}
-        # 暗室座標はランタイム注記のためリセットで解除する（固定設定ではない）
-        self.dark_room_coord = None
-        # フィールド陣営もオペレータ設定のためリセットで未選択に戻す（固定設定ではない）
-        self.field_side = None
-        # 5号機 自動走行もランタイム状態のためリセットで消灯へ戻す
-        self.unit5_auto_run = "off"
-        # 周波数候補もランタイム入力のためリセットで未入力へ戻す
-        # （検出器は再起動しない＝直近の設定ファイルのまま動き続ける）
-        self.room_frequencies = {"A": [], "B": [], "C": []}
-        # 号機 IP は固定設定のためリセットしない（config.json の値を維持）
-        # 暗室座標オフセットは原点校正（フィールド固有の設定値）のためリセットで消さない
-
-
-state = AppState()
-connections: dict[str, set[WebSocket]] = {
-    "control": set(),
-    "analytics": set(),
-    "engineer": set(),
-    "reporter": set(),
-    "master": set(),
-    "all": set(),
-}
 
 
 VOICE_DIR = BASE_DIR.parent / "voice_comm"   # server/voice_comm（隣のディレクトリ）
 
-app = FastAPI(title="Rescue Robot Dummy Apps")
+VOICE_DIR = BASE_DIR.parent / "voice_comm"   # server/voice_comm（隣のディレクトリ）
+
+app = FastAPI(title="Rescue Generic Tools")
+
 
 
 # WebRTC クライアントライブラリは relay と同じ実体を配信する（複製を持たない）。
@@ -834,6 +512,11 @@ async def webrtc_client_js() -> FileResponse:
 RELAY_WEB_DIR = REPO_ROOT / "server" / "webrtc_relay" / "web"
 MIC_HUB_STATIC_DIR = REPO_ROOT / "server" / "mic_hub" / "static"
 
+# Res26 コントロールシステム（別リポジトリ res26_control_ui）の待受ポート。
+# 8000/80・relay(8080)・voice(8766)・mic hub(8770)・joy_node(8700) と衝突しない
+# 番号を固定で使う。あちらの main.py も同じ 8001 を固定している。
+RES26_PORT = 8001
+
 _ENDPOINT_KEYS = ("control_ui_port", "relay_port", "voice_port", "mic_hub_port")
 
 
@@ -842,9 +525,15 @@ def server_endpoints() -> dict[str, Any]:
 
     ホスト名は返さない。ブラウザは自分が開いているホスト（location.hostname）の
     ポートだけ差し替えれば各サービスへ届くので、IP を JS へ渡す必要が無い。
+
+    res26_port だけは units.json 由来ではない。Res26 コントロールシステムは
+    kkrtx にしか無い大会固有アプリで、号機側は知る必要がないため units.json
+    （フリート共通のポート表）には書かず、下の RES26_PORT を単一の真実とする。
     """
     cfg = UNITS_CONFIG.get("server") or {}
-    return {key: cfg[key] for key in _ENDPOINT_KEYS if key in cfg}
+    endpoints = {key: cfg[key] for key in _ENDPOINT_KEYS if key in cfg}
+    endpoints["res26_port"] = RES26_PORT
+    return endpoints
 
 
 @app.get("/api/endpoints")
@@ -865,103 +554,9 @@ async def endpoints_js() -> Response:
     return Response(content=body, media_type="application/javascript")
 
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.mount("/voice", StaticFiles(directory=str(VOICE_DIR)), name="voice")
-app.mount("/viewer", StaticFiles(directory=str(RELAY_WEB_DIR), html=True), name="viewer")
-app.mount("/mic", StaticFiles(directory=str(MIC_HUB_STATIC_DIR), html=True), name="mic")
-
-
-# ---- 大会固有画面（リポジトリ外のディレクトリを /op に配信する）--------------
-#  大会ごとの画面を main.py や index.html に足していくと、大会が変わるたびに分岐が
-#  溜まる。そこで「汎用プラットフォーム層＝このリポジトリ」「大会固有画面＝別
-#  リポジトリ」に分け、後者は OP_SCREENS_DIR が指すディレクトリを /op へそのまま
-#  静的配信する（設定は ~/.config/rescue-pi/server.env の 1 行。規約 6）。
-#
-#  層の契約: 大会固有画面は **静的な HTML/JS/CSS だけ**。バックエンドの追加を
-#  要求しない。既に公開している /api/* と /ws/{role}、共有アセットの /static/* と
-#  /voice/* を叩いて作る。新しい API が要るなら、それはもう大会固有ではなく汎用
-#  機能なので、このリポジトリ側に入れる。Python を読み込むプラグイン機構は作らない
-#  （任意コード実行の入口を増やさないため）。
-#
-#  大会画面リポジトリは自分のルートに index.html を置き、その中のサブ画面への
-#  ナビゲーションも自前で持つ。control_ui から張るリンクは /op/ の 1 本だけ。
-#
-#  未設定なら何もしない（/op は 404 のまま。既存環境は完全に無変更）。設定が
-#  壊れていてもマウントを飛ばすだけにする。ここで例外を投げると 8000 番の本体ごと
-#  起動しなくなり、大会当日にいちばん困るため。
-OP_SCREENS_DIR = (os.environ.get("OP_SCREENS_DIR") or "").strip()
-
-
-def _mount_op_screens(raw_path: str) -> None:
-    if not raw_path:
-        return                     # 未設定。/op は生やさない
-    base = Path(raw_path)
-    if not base.is_absolute():
-        print(f"[op] OP_SCREENS_DIR は絶対パスで指定してください（/op は無効）: {raw_path}")
-        return
-    if not base.exists():
-        print(f"[op] OP_SCREENS_DIR が存在しません（/op は無効）: {base}")
-        return
-    if not base.is_dir():
-        print(f"[op] OP_SCREENS_DIR がディレクトリではありません（/op は無効）: {base}")
-        return
-    if not os.access(base, os.R_OK | os.X_OK):
-        print(f"[op] OP_SCREENS_DIR を読めません（/op は無効）: {base}")
-        return
-    app.mount("/op", StaticFiles(directory=str(base), html=True), name="op")
-    print(f"[op] /op/ -> {base}")
-
-
-_mount_op_screens(OP_SCREENS_DIR)
-
-
-async def broadcast(message: dict[str, Any], channel: str = "all") -> None:
-    payload = json.dumps(message, ensure_ascii=False)
-    targets: set[WebSocket] = set()
-    if channel == "all":
-        targets = connections["all"]
-    else:
-        targets = connections.get(channel, set()) | connections["all"]
-
-    dead: list[WebSocket] = []
-    for ws in targets:
-        try:
-            await ws.send_text(payload)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        for bucket in connections.values():
-            bucket.discard(ws)
-
-
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/control")
-async def control_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "control.html")
-
-
-@app.get("/analytics")
-async def analytics_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "analytics.html")
-
-
-@app.get("/engineer")
-async def engineer_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "engineer.html")
-
-
-@app.get("/reporter")
-async def reporter_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "reporter.html")
-
-
-@app.get("/master")
-async def master_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "master.html")
 
 
 @app.get("/ping-monitor")
@@ -984,19 +579,13 @@ async def grid_page() -> FileResponse:
     """全号機のカメラをタイル表示するグリッド視聴画面。"""
     return FileResponse(STATIC_DIR / "grid.html")
 
-
 @app.on_event("startup")
 async def _start_ping_monitor() -> None:
     # ping 監視のバックグラウンドタスクを起動する。
     asyncio.create_task(_ping_loop())
-    # 号機 接続状況（units[n].connected）を実 ping で更新するタスクも起動する。
+    # 号機の経路解決（/api/units が返す live 経路）を実 ping で更新するタスク。
     asyncio.create_task(_units_ping_loop())
 
-
-@app.get("/api/state")
-async def get_state() -> dict[str, Any]:
-    async with state.lock:
-        return state.snapshot()
 
 
 @app.get("/api/units")
@@ -1133,9 +722,8 @@ async def _unit_power_action(action: str, unit: int) -> Any:
     ok, msg = await _master_control_power(ip, action)
     label = "シャットダウン" if action == "shutdown" else "再起動"
     if ok:
-        await state.push_notification(f"{unit}号機 {label}を実行しました")
-        snap = state.snapshot()
-        await broadcast({"type": "state", "payload": snap})
+        # 状態バス（WebSocket 配信）は Res26 側（8001）へ移ったので、ここでは
+        # 通知を配らず結果だけ返す。呼び出し元の画面が JSON を見て表示する。
         return {"status": "ok", "unit": unit, "message": msg}
     return JSONResponse(
         status_code=502,
@@ -1158,7 +746,7 @@ async def post_unit_shutdown(request: Request) -> Any:
 
 
 async def _units_power_all(action: str) -> Any:
-    """全号機（state.unit_ips の 1..5）を master-control API 経由で一斉に reboot/shutdown する。
+    """全号機（units.json の 1..5）を master-control API 経由で一斉に reboot/shutdown する。
 
     各号機へ _master_control_power(ip, action) を asyncio.gather で並行に呼び出し、
     オフライン等で失敗した号機は個別にグレースフルへ倒して他号機の処理をブロックしない。
@@ -1179,10 +767,8 @@ async def _units_power_all(action: str) -> Any:
         if ok:
             success += 1
     total = len(outcomes)
-    label = "全機シャットダウン" if action == "shutdown" else "全機再起動"
-    await state.push_notification(f"{label}: {success}/{total} 実行")
-    snap = state.snapshot()
-    await broadcast({"type": "state", "payload": snap})
+    # 状態バス（WebSocket 配信）は Res26 側（8001）へ移ったので、ここでは通知を
+    # 配らず結果だけ返す。呼び出し元の画面が JSON を見て表示する。
     return {"status": "ok", "action": action, "results": results, "success": success, "total": total}
 
 
@@ -1192,546 +778,10 @@ async def post_units_shutdown_all() -> Any:
     return await _units_power_all("shutdown")
 
 
-# ===== damiyan 検出器の周波数設定（reporter からのルーム別 12 周波数入力） =====
-# 検出器（unit3/4/5、web :8771-8773）は起動時に -f の JSON を読む作りで、実行中の
-# 変更 API は無い（web_server.py は GET のみ）。よって「号機別ファイル書き出し＋
-# プロセス再起動」で反映する。起動コマンドは all_start.bash と同一形式:
-#   uv run damiyan-detector -f <file> --stream http://127.0.0.1:8770/<号機> --label unitN
-#     --web 877N --web-host 0.0.0.0   （cwd=DAMIYAN_DIR、kk ユーザー）
-# 音源は mic_hub（server/mic_hub、単一ポート + パスで号機選択）。旧 mic_relay の
-# 号機別ポート 500N は廃止済み。契約は docs/protocols/damiyan.md を参照。
-# damiyan-detector は本リポジトリ外（別リポジトリ）なので、置き場所は環境変数で
-# 上書きできる。
-DAMIYAN_DIR = os.environ.get("DAMIYAN_DIR") or "/home/kk/kk_ws/src/damiyan-signal-processing"
-DAMIYAN_LOG_DIR = os.environ.get("DAMIYAN_LOG_DIR") or "/home/kk/kk_ws/logs"
-# mic_hub の購読 URL（units.json の server.host / server.mic_hub_port 由来）。
-# 検出器は control_ui と同じホスト(kkrtx)で動くため既定は 127.0.0.1。
-MIC_HUB_PORT = int((UNITS_CONFIG.get("server") or {}).get("mic_hub_port") or 8770)
-MIC_HUB_HOST = os.environ.get("MIC_HUB_HOST") or "127.0.0.1"
-DAMIYAN_FREQ_COUNT_MAX = 12  # cli.py validate_frequencies は 1〜12 個を受理
-DAMIYAN_FREQ_MIN_HZ = 200.0
-DAMIYAN_FREQ_MAX_HZ = 3000.0
-DAMIYAN_FREQ_SPACING_HZ = 40.0  # cli.py validate_frequencies と同じ制約
-DAMIYAN_UNITS = (3, 4, 5)  # 検出器が存在する号機
-_damiyan_lock = asyncio.Lock()  # 検出器再起動の直列化
-
-
-def _validate_room_frequencies(raw: Any) -> tuple[list[float] | None, str]:
-    """reporter 入力の周波数リストを damiyan と同じ制約で検証する。"""
-    try:
-        freqs = [float(x) for x in raw]
-    except (TypeError, ValueError):
-        return None, "周波数は数値（1〜12 個）の配列で指定してください"
-    if not (1 <= len(freqs) <= DAMIYAN_FREQ_COUNT_MAX):
-        return None, f"周波数は 1〜{DAMIYAN_FREQ_COUNT_MAX} 個で指定してください（{len(freqs)} 個）"
-    for f in freqs:
-        if not (DAMIYAN_FREQ_MIN_HZ <= f <= DAMIYAN_FREQ_MAX_HZ):
-            return None, f"{f:g} Hz が範囲外です（{DAMIYAN_FREQ_MIN_HZ:g}〜{DAMIYAN_FREQ_MAX_HZ:g} Hz）"
-    s = sorted(freqs)
-    for a, b in zip(s, s[1:]):
-        if b - a < DAMIYAN_FREQ_SPACING_HZ:
-            return None, f"{a:g} Hz と {b:g} Hz が近すぎます（{DAMIYAN_FREQ_SPACING_HZ:g} Hz 以上離す）"
-    return freqs, ""
-
-
-def _write_damiyan_freq_file(unit: int, freqs: list[float], room: str) -> str:
-    """号機別の周波数ファイルを damiyan 既存フォーマットで書き出す。
-
-    共有の frequencies.json はフォールバックとして触らない。
-    """
-    path = f"{DAMIYAN_DIR}/frequencies_unit{unit}.json"
-    payload = {
-        "_source": f"VideoControl reporter 入力（ルーム{room} → unit{unit}）",
-        "frequencies": freqs,
-    }
-    with open(path, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp, ensure_ascii=False, indent=2)
-        fp.write("\n")
-    try:
-        import shutil
-
-        shutil.chown(path, "kk", "kk")
-    except Exception:
-        pass  # 所有者変更は必須ではない（644 で kk から読める）
-    return path
-
-
-def _restart_damiyan_detector_sync(unit: int, freq_file: str) -> tuple[bool, str]:
-    """指定号機の検出器を停止し、新しい周波数ファイルで起動し直す（同期）。
-
-    多重起動防止のため pkill → 消滅確認（必要なら SIGKILL）→ 起動 → :877N の
-    応答復帰を最大 25 秒待つ。VideoControl は root 稼働のため、検出器は従来と
-    同じ kk ユーザーで起動する（runuser + login shell で uv の PATH も解決）。
-    """
-    stream = f"http://{MIC_HUB_HOST}:{MIC_HUB_PORT}/{unit}"   # mic_hub のパス選択
-    web = 8768 + unit
-    label = f"unit{unit}"
-    pat = f"damiyan-detector.*--label {label}"
-    log = f"{DAMIYAN_LOG_DIR}/damiyan_{label}_reporter.log"
-
-    subprocess.run(["pkill", "-f", pat], check=False)
-    for _ in range(20):  # 最大 5 秒待って確実に停止
-        if subprocess.run(["pgrep", "-f", pat], capture_output=True).returncode != 0:
-            break
-        time.sleep(0.25)
-    else:
-        subprocess.run(["pkill", "-9", "-f", pat], check=False)
-        time.sleep(0.5)
-
-    inner = (
-        f"mkdir -p {shlex.quote(DAMIYAN_LOG_DIR)} && cd {shlex.quote(DAMIYAN_DIR)} && "
-        f"nohup uv run damiyan-detector -f {shlex.quote(freq_file)} "
-        f"--stream {shlex.quote(stream)} --label {label} --web {web} --web-host 0.0.0.0 "
-        f">> {shlex.quote(log)} 2>&1 &"
-    )
-    if os.geteuid() == 0:
-        cmd = ["runuser", "-u", "kk", "--", "bash", "-lc", inner]
-    else:
-        cmd = ["bash", "-lc", inner]
-    subprocess.run(cmd, check=False)
-
-    deadline = time.time() + 25
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{web}/", timeout=2) as resp:
-                if 200 <= resp.status < 500:
-                    return True, f"再起動完了（:{web} 応答確認）"
-        except Exception:
-            time.sleep(0.5)
-    return False, f"再起動後 :{web} が応答しません（ログ: {log}）"
-
-
-async def _deploy_room_frequencies(rooms: list[str]) -> None:
-    """指定ルームの周波数を対応検出器へ反映（ファイル書き出し＋再起動）する。
-
-    バックグラウンドタスクとして実行し、結果はルームごとに通知バーへ流す。
-    """
-    async with _damiyan_lock:
-        for room in rooms:
-            async with state.lock:
-                unit = int(state.room_units.get(room, 0) or 0)
-                freqs = list(state.room_frequencies.get(room) or [])
-            if not freqs:
-                continue
-            if unit not in DAMIYAN_UNITS:
-                await state.push_notification(
-                    f"周波数反映不可: ルーム{room} の対応号機"
-                    f"（{unit or '未割当'}）に検出器がありません"
-                )
-                await broadcast({"type": "state", "payload": state.snapshot()})
-                continue
-            try:
-                path = await asyncio.to_thread(
-                    _write_damiyan_freq_file, unit, freqs, room
-                )
-                ok, msg = await asyncio.to_thread(
-                    _restart_damiyan_detector_sync, unit, path
-                )
-            except Exception as exc:
-                ok, msg = False, f"内部エラー: {exc}"
-            head = "周波数反映OK" if ok else "周波数反映失敗"
-            await state.push_notification(f"{head}: ルーム{room}（unit{unit}）{msg}")
-            await broadcast({"type": "state", "payload": state.snapshot()})
-
-
 @app.post("/api/units/reboot_all")
 async def post_units_reboot_all() -> Any:
     """全号機を master-control API 経由で一斉再起動する。"""
     return await _units_power_all("reboot")
-
-
-@app.post("/api/notify")
-async def post_notify(body: dict[str, Any]) -> dict[str, str]:
-    text = str(body.get("text", "")).strip()
-    if not text:
-        return {"status": "ignored"}
-    await state.push_notification(text)
-    snap = state.snapshot()
-    await broadcast({"type": "state", "payload": snap})
-    return {"status": "ok"}
-
-
-@app.post("/api/analysis")
-async def post_analysis(body: dict[str, Any]) -> dict[str, str]:
-    async with state.lock:
-        for key in DEFAULT_ANALYSIS:
-            if key in body:
-                state.analysis[key] = str(body[key])
-    snap = state.snapshot()
-    await broadcast({"type": "state", "payload": snap})
-    return {"status": "ok"}
-
-
-@app.post("/api/master")
-async def post_master(body: dict[str, Any]) -> dict[str, str]:
-    action = body.get("action")
-    async with state.lock:
-        if action == "show_overlay":
-            state.master_overlay = {
-                "visible": True,
-                "title": str(body.get("title", "撮影指示")),
-                "lines": list(body.get("lines", [])),
-            }
-        elif action == "hide_overlay":
-            state.master_overlay = {"visible": False, "title": "", "lines": []}
-        elif action == "set_analysis":
-            preset = body.get("preset", {})
-            for key, val in preset.items():
-                if key in state.analysis:
-                    state.analysis[key] = str(val)
-            state.analysis["status"] = str(body.get("status", "解析中"))
-        elif action == "set_analytics_target":
-            unit = int(body.get("unit", 1))
-            if 1 <= unit <= 5:
-                state.analytics_target_unit = unit
-        elif action == "set_webrtc_server":
-            state.webrtc_server = str(body.get("server", "")).strip()
-        elif action == "complete_task":
-            task_id = int(body.get("task_id", 0))
-            for t in state.tasks:
-                if t["id"] == task_id:
-                    t["done"] = True
-        elif action == "complete_next":
-            room = body.get("room") or None
-            for t in state.tasks:
-                if t["room"] == room and not t["done"]:
-                    t["done"] = True
-                    break
-        elif action == "set_unit_ips":
-            # 号機 IP は config/units.json 固定・変更不可。クライアントからの変更要求は無視。
-            print("[WARN] set_unit_ips は無効化されています（号機 IP は config/units.json 固定）。要求を無視しました。")
-        elif action == "reset":
-            state.reset()
-    snap = state.snapshot()
-    await broadcast({"type": "state", "payload": snap})
-    return {"status": "ok"}
-
-
-async def apply_client_message(msg: dict[str, Any]) -> None:
-    msg_type = msg.get("type")
-    changed = False
-
-    if msg_type == "notify":
-        text = str(msg.get("text", "")).strip()
-        if text:
-            await state.push_notification(text)
-            changed = True
-
-    elif msg_type == "set_analytics_target":
-        unit = int(msg.get("unit", 1))
-        async with state.lock:
-            if 1 <= unit <= 5:
-                state.analytics_target_unit = unit
-                changed = True
-
-    # set_control_video / set_control_operating は廃止：操縦画面の機体選択は
-    # クライアントローカルになり、サーバー共有状態を経由しない。
-
-    elif msg_type == "engineer_action":
-        action = msg.get("action")
-        unit = int(msg.get("unit", 1))
-        notify_text = ""
-        async with state.lock:
-            if action == "interrupt1":
-                state.control_request = {
-                    "pending": True,
-                    "unit": unit,
-                    "timestamp": time.time(),
-                }
-            elif action == "interrupt2":
-                state.control_request = {
-                    "pending": True,
-                    "unit": unit,
-                    "timestamp": time.time(),
-                }
-            elif action == "analysis1":
-                state.analysis_request = {
-                    "pending": True,
-                    "unit": unit,
-                    "timestamp": time.time(),
-                }
-            elif action == "analysis2":
-                state.analysis_request = {
-                    "pending": True,
-                    "unit": unit,
-                    "timestamp": time.time(),
-                }
-            elif action == "toggle_method":
-                u = state.units.get(unit)
-                if u:
-                    u["method"] = "TPIP" if u["method"] == "WiFi" else "WiFi"
-                    notify_text = f"{unit}号機 通信方法 → {u['method']}"
-            elif action == "disable_unit":
-                u = state.units.get(unit)
-                if u:
-                    u["disabled"] = not u["disabled"]
-                    u["connected"] = not u["disabled"]
-                    label = "行動不能" if u["disabled"] else "復活"
-                    notify_text = f"{unit}号機 {label}"
-            elif action == "reboot_pi":
-                notify_text = f"{unit}号機 Raspberry Pi 再起動要求"
-            elif action == "set_room":
-                room = str(msg.get("room", "A"))
-                if room in state.room_units:
-                    # 1機体は1ルームのみ：他ルームから外す
-                    for r in state.room_units:
-                        if state.room_units[r] == unit:
-                            state.room_units[r] = 0
-                    state.room_units[room] = unit
-                    notify_text = f"ルーム{room} 対応 → {unit}号機"
-            changed = True
-        if notify_text:
-            await state.push_notification(notify_text)
-
-    elif msg_type == "accept_control_request":
-        # pending をクリアするのみ。機体選択はクライアントローカルのため、
-        # 受諾したクライアントが自画面の選択を要請号機へ切り替える。
-        async with state.lock:
-            req = state.control_request
-            if req.get("pending") and 1 <= req.get("unit", 0) <= 5:
-                state.control_request = {
-                    "pending": False,
-                    "unit": 0,
-                    "timestamp": 0,
-                }
-                changed = True
-
-    elif msg_type == "accept_analysis_request":
-        async with state.lock:
-            req = state.analysis_request
-            if req.get("pending") and 1 <= req.get("unit", 0) <= 5:
-                state.analytics_target_unit = req["unit"]
-                state.analysis_request = {
-                    "pending": False,
-                    "unit": 0,
-                    "timestamp": 0,
-                }
-                changed = True
-
-    elif msg_type == "update_analysis":
-        async with state.lock:
-            for key in DEFAULT_ANALYSIS:
-                if key in msg:
-                    state.analysis[key] = str(msg[key])
-            changed = True
-
-    elif msg_type == "set_room_analysis":
-        room = str(msg.get("room", ""))
-        async with state.lock:
-            ra = state.room_analysis.get(room)
-            if ra is not None:
-                for key in ("stove", "color", "notes", "qr", "pattern", "freq"):
-                    if key in msg:
-                        ra[key] = str(msg[key])
-                for key in ("stoveDone", "injuryDone", "colorDone", "patternDone"):
-                    if key in msg:
-                        ra[key] = bool(msg[key])
-                changed = True
-
-    elif msg_type == "set_room_frequencies":
-        # reporter からのルーム別周波数入力（1〜12 個）。検証 → 共有状態更新 → 検出器へ
-        # 反映（バックグラウンド）。「最初の入力」（全ルーム未入力からの入力）は
-        # 3 ルームすべてへ展開して 3 検出器を再起動、以降は該当ルームのみ。
-        room = str(msg.get("room", ""))
-        freqs, err = _validate_room_frequencies(msg.get("frequencies", []))
-        if room not in ("A", "B", "C"):
-            await state.push_notification(f"周波数入力エラー: ルーム指定が不正です（{room}）")
-            changed = True
-        elif freqs is None:
-            await state.push_notification(f"周波数入力エラー: {err}")
-            changed = True
-        else:
-            async with state.lock:
-                first_input = all(
-                    not state.room_frequencies.get(r) for r in ("A", "B", "C")
-                )
-                if first_input:
-                    for r in ("A", "B", "C"):
-                        state.room_frequencies[r] = list(freqs)
-                    rooms = ["A", "B", "C"]
-                else:
-                    state.room_frequencies[room] = list(freqs)
-                    rooms = [room]
-                changed = True
-            label = "（初回入力のため3ルームへ展開）" if first_input else ""
-            await state.push_notification(
-                f"ルーム{room} 周波数を受付{label}。検出器へ反映中…"
-            )
-            asyncio.create_task(_deploy_room_frequencies(rooms))
-
-    elif msg_type == "set_unit_qr":
-        # 号機ごとの自動QR検出を共有状態（units[n]）へ反映する（確定ゲート無し）。
-        # アナリティクスの各映像スキャナが「テキスト変化 / 検出↔未検出の反転」時のみ
-        # 送るため、ここでは unit を 1..5 に検証し、qr は文字列化＋長さ制限のうえ、
-        # テキストか検出状態が実際に変わった時だけ更新・配信する（同一値の高頻度
-        # 送信で全クライアントへ無駄に再送しないよう抑制）。room_analysis[room].qr
-        # （確定ゲート付き）は一切触らない＝別系統。
-        try:
-            unit = int(msg.get("unit", 0))
-        except (TypeError, ValueError):
-            unit = 0
-        async with state.lock:
-            u = state.units.get(unit)
-            if u is not None and 1 <= unit <= 5:
-                active = bool(msg.get("active", False))
-                # 未検出（active=False）ならテキストは空にそろえる。
-                qr = str(msg.get("qr", ""))[:256] if active else ""
-                if u.get("qr") != qr or u.get("qr_active") != active:
-                    u["qr"] = qr
-                    u["qr_active"] = active
-                    u["qr_ts"] = int(time.time() * 1000)
-                    changed = True
-
-    elif msg_type == "complete_task":
-        task_id = int(msg.get("task_id", 0))
-        async with state.lock:
-            for t in state.tasks:
-                if t["id"] == task_id:
-                    t["done"] = True
-                    changed = True
-
-    elif msg_type == "set_dark_room_coord":
-        # 暗室座標をマップ上のクリックで設定／解除（全モードへ共有）。
-        # coord が null → 解除、{x,y}(0..1) → 設定、それ以外の不正値は無視。
-        coord = msg.get("coord")
-        auto_cancel = False
-        async with state.lock:
-            if coord is None:
-                if state.dark_room_coord is not None:
-                    state.dark_room_coord = None
-                    changed = True
-                    # 座標クリア＝走行対象が消えるため自動走行を解除。
-                    # 走行中(lit)なら経路をキャンセルする。
-                    if state.unit5_auto_run == "lit":
-                        auto_cancel = True
-                    if state.unit5_auto_run != "off":
-                        state.unit5_auto_run = "off"
-            else:
-                parsed = _parse_norm_coord(coord)
-                if parsed is not None:
-                    prev = state.dark_room_coord
-                    is_new_or_changed = prev is None or prev != parsed
-                    state.dark_room_coord = parsed
-                    changed = True
-                    if is_new_or_changed:
-                        # 新規設定/変更 → 点滅(armed)。走行中(lit)に目標が変わった
-                        # 場合は旧ゴールが陳腐化するためキャンセルし、再確認を促す。
-                        if state.unit5_auto_run == "lit":
-                            auto_cancel = True
-                        state.unit5_auto_run = "armed"
-        if auto_cancel:
-            # 送信はエッジトリガの副作用。UI 反映(broadcast)を待たせないよう非同期発火。
-            asyncio.create_task(
-                _send_robot_command(resolve_unit_addr(5) or "", {"command": "cancel_goal"})
-            )
-
-    elif msg_type == "set_field_side":
-        # フィールド陣営を設定／解除（全モード共有・主にマスターから送信）。
-        # side が "red"/"blue" なら設定、null なら未選択に解除。それ以外は無視。
-        side = msg.get("side")
-        async with state.lock:
-            if side is None:
-                if state.field_side is not None:
-                    state.field_side = None
-                    changed = True
-            elif side in ("red", "blue"):
-                if state.field_side != side:
-                    state.field_side = side
-                    changed = True
-
-    elif msg_type == "set_dark_room_offset":
-        # 暗室座標オフセットを field_side ごとに設定（マスターから送信・全モード共有）。
-        # {side:"red"|"blue", x:下方向(下+), y:右方向(右−)}。x/y は map[m] 想定の実数。
-        side = msg.get("side")
-        async with state.lock:
-            if side in ("red", "blue"):
-                cur = state.dark_room_offset.get(side, {"x": 0.0, "y": 0.0})
-                new_x = cur.get("x", 0.0)
-                new_y = cur.get("y", 0.0)
-                if "x" in msg:
-                    try:
-                        new_x = float(msg["x"])
-                    except (TypeError, ValueError):
-                        new_x = cur.get("x", 0.0)
-                if "y" in msg:
-                    try:
-                        new_y = float(msg["y"])
-                    except (TypeError, ValueError):
-                        new_y = cur.get("y", 0.0)
-                if new_x != cur.get("x") or new_y != cur.get("y"):
-                    state.dark_room_offset[side] = {"x": new_x, "y": new_y}
-                    changed = True
-
-    elif msg_type == "unit5_auto_run_toggle":
-        # 5号機自動走行ボタンのトグル。
-        #   armed(点滅) → lit(点灯): 暗室座標を目標に set_goal を送信し走行開始。
-        #   lit(点灯)  → off(消灯): cancel_goal を送信し経路走行をキャンセル。
-        #   off(消灯)         : 何もしない（暗室座標未入力＝走行対象なし）。
-        goal_payload: dict[str, Any] | None = None
-        do_cancel = False
-        async with state.lock:
-            cur = state.unit5_auto_run
-            if cur == "armed" and state.dark_room_coord is not None:
-                state.unit5_auto_run = "lit"
-                # 選択中フィールドのオフセットで原点校正（未選択時は青の規約/オフセット）。
-                side_key = state.field_side if state.field_side in ("red", "blue") else "blue"
-                goal_payload = _dark_room_goal(
-                    state.dark_room_coord,
-                    state.field_side,
-                    state.dark_room_offset.get(side_key),
-                )
-                changed = True
-            elif cur == "lit":
-                state.unit5_auto_run = "off"
-                do_cancel = True
-                changed = True
-        ip = resolve_unit_addr(5) or ""
-        # 送信はエッジトリガの副作用。UI 反映(broadcast)を待たせないよう非同期発火。
-        if goal_payload is not None:
-            asyncio.create_task(
-                _send_robot_command(ip, {"command": "set_goal", **goal_payload})
-            )
-        if do_cancel:
-            asyncio.create_task(_send_robot_command(ip, {"command": "cancel_goal"}))
-
-    elif msg_type == "reporter_cue":
-        room = str(msg.get("room", ""))
-        text = str(msg.get("text", ""))
-        if text:
-            await state.push_notification(f"[ルーム{room}] {text}")
-            changed = True
-
-    if changed:
-        snap = state.snapshot()
-        await broadcast({"type": "state", "payload": snap})
-
-
-@app.websocket("/ws/{role}")
-async def websocket_endpoint(websocket: WebSocket, role: str) -> None:
-    if role not in connections:
-        role = "all"
-    await websocket.accept()
-    connections[role].add(websocket)
-    connections["all"].add(websocket)
-
-    snap = state.snapshot()
-    await websocket.send_text(
-        json.dumps({"type": "state", "payload": snap}, ensure_ascii=False)
-    )
-
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            await apply_client_message(msg)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        connections[role].discard(websocket)
-        connections["all"].discard(websocket)
 
 
 def _ssl_args() -> dict[str, str]:
@@ -1751,12 +801,40 @@ def _ssl_args() -> dict[str, str]:
     print("[HTTP] 証明書が無いため HTTP で起動します（iPhoneのマイクは不可）")
     return {}
 
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/voice", StaticFiles(directory=str(VOICE_DIR)), name="voice")
+app.mount("/viewer", StaticFiles(directory=str(RELAY_WEB_DIR), html=True), name="viewer")
+app.mount("/mic", StaticFiles(directory=str(MIC_HUB_STATIC_DIR), html=True), name="mic")
+
+
+# ---- Res26 コントロールシステムへのリダイレクト ------------------------------
+#  操作画面 5 モードは res26_control_ui（ポート 8001）へ移った。旧 URL を叩いた
+#  ブックマークや手癖を拾って飛ばす。301 ではなく 302 なのは、ブラウザに恒久
+#  キャッシュさせないため（大会ごとに構成が変わりうる）。
+#  ホスト名はリクエストのものを使う。IP でも kkrtx.local でも同じように動く。
+RES26_PAGES = ("control", "analytics", "engineer", "reporter", "master")
+
+
+def _res26_url(request: Request, path: str) -> str:
+    return f"http://{request.url.hostname}:{RES26_PORT}/{path}"
+
+
+def _make_res26_redirect(path: str):
+    async def _redirect(request: Request) -> RedirectResponse:
+        return RedirectResponse(_res26_url(request, path), status_code=302)
+
+    return _redirect
+
+
+for _page in RES26_PAGES:
+    app.add_api_route(f"/{_page}", _make_res26_redirect(_page), methods=["GET"])
+
 
 if __name__ == "__main__":
     import uvicorn
 
     # ポートは units.json の server.control_ui_port（既定 80）。開発時は自動再読込
-    # するが、systemd 常駐では CONTROL_UI_RELOAD=0 で切る。
+    # するが、常駐時は CONTROL_UI_RELOAD=0 で切る。
     _port = int(
         os.environ.get("CONTROL_UI_PORT")
         or (UNITS_CONFIG.get("server") or {}).get("control_ui_port")

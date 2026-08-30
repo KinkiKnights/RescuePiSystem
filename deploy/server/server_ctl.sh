@@ -80,7 +80,7 @@ RESCUE_ENV_KEYS=(
   CONTROL_UI_PORT CONTROL_UI_UNPRIV_PORT CONTROL_UI_SUDO CONTROL_UI_RELOAD
   RELAY_PORT VOICE_PORT MIC_HUB_PORT
   MIC_HUB_OUTDIR MIC_HUB_SEGMENT MIC_HUB_RETENTION_HOURS MIC_HUB_MAX_GB
-  STOP_GRACE OP_SCREENS_DIR
+  STOP_GRACE
 )
 
 load_server_env() {
@@ -134,8 +134,6 @@ PY
 : "${MIC_HUB_RETENTION_HOURS:=24}"
 : "${MIC_HUB_MAX_GB:=8}"
 : "${STOP_GRACE:=8}"
-# 大会固有画面のディレクトリ（control_ui が /op へ配信する）。未設定なら /op は無効。
-: "${OP_SCREENS_DIR:=}"
 
 # 特権ポート (<1024) は一般ユーザの python では bind できない。systemd ユニットは
 # AmbientCapabilities=CAP_NET_BIND_SERVICE で解決していたが、手動起動にそれは無い。
@@ -165,8 +163,7 @@ svc_spec() {
   case "$1" in
     control_ui)
       SVC_DIR="${REPO_DIR}/server/control_ui"
-      SVC_ENV=("HOME=${HOME}" "CONTROL_UI_PORT=${CONTROL_UI_PORT}"
-               "CONTROL_UI_RELOAD=${CONTROL_UI_RELOAD}" "OP_SCREENS_DIR=${OP_SCREENS_DIR}")
+      SVC_ENV=("HOME=${HOME}" "CONTROL_UI_PORT=${CONTROL_UI_PORT}" "CONTROL_UI_RELOAD=${CONTROL_UI_RELOAD}")
       SVC_CMD=(/usr/bin/python3 "${REPO_DIR}/server/control_ui/main.py")
       SVC_PORT="${CONTROL_UI_PORT}"
       SVC_PAT="control_ui/main.py"

@@ -109,7 +109,8 @@ KinkiKnights レスキューロボットの **号機 (Raspberry Pi) と運用サ
 config/     号機・機器アドレスの単一の真実 (units.json)
 robot/      号機 Pi に載るもの  … master_control / camera_publisher / mic_publisher / ros2
             device_config.py = カメラ/マイクのデバイス設定 (UI から候補を選ぶ)
-server/     kkrtx に載るもの    … control_ui / voice_comm / mic_hub / webrtc_relay
+server/     kkrtx に載るもの    … control_ui(汎用ツール) / voice_comm / mic_hub / webrtc_relay
+            ※競技用の操作画面 5 モードは別リポジトリ res26_control_ui(:8001)へ分離
 deploy/     セットアップ        … robot/*.sh, server/kkrtx_setup.sh, systemd/*.service.in
 tools/      検証用              … mic_selftest.py, headless_viewer
 docs/       ドキュメント        … architecture / protocols / spec / operations

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>レスキューロボコン — ダミーアプリ一覧</title>
-  <link rel="stylesheet" href="/static/common.css" />
+  <link rel="stylesheet" href="/static/base.css" />
   <style>
     .index-main {
       flex: 1;
@@ -89,11 +89,7 @@
     </header>
     <main class="index-main">
       <nav class="index-grid" aria-label="アプリ一覧">
-        <a class="index-link" href="/control">コントロールモード<small>操縦担当</small></a>
-        <a class="index-link" href="/analytics">アナリティクスモード<small>解析担当</small></a>
-        <a class="index-link" href="/engineer">エンジニアモード<small>監視エンジニア</small></a>
-        <a class="index-link" href="/reporter">報告者モード<small>スマホ向け</small></a>
-        <a class="index-link" href="/master">マスターモード<small>撮影進行</small></a>
+        <a class="index-link" id="res26Link" href="#">Res26 コントロールシステム<small>操作画面 5 モード（別ポート）</small></a>
         <a class="index-link" href="/ping-monitor">Ping モニター<small>ネットワーク監視</small></a>
         <a class="index-link" href="/grid">WebRTC グリッド<small>全カメラ一覧</small></a>
         <a class="index-link" href="/viewer/">WebRTC ビュワー<small>1 号機ずつ視聴</small></a>
@@ -101,7 +97,6 @@
         <a class="index-link" id="autoControlLink" href="#" target="_blank" rel="noopener">フィールド情報入力・監視画面（自動探索・デバッグ）<small>5号機 自律探索</small></a>
         <a class="index-link" href="/all-monitor">4K オールモニタ<small>2×2 統合モニタ</small></a>
         <a class="index-link" href="/control-panel">コントロールパネル<small>統合切替操作</small></a>
-        <a class="index-link" href="/op/">大会固有画面<small>今大会の専用画面</small></a>
       </nav>
     </main>
     <div class="index-danger">
@@ -115,6 +110,15 @@
   </div>
   <script>
     document.getElementById('autoControlLink').href = location.protocol + '//' + location.hostname + ':8092/?debug';
+    // Res26 コントロールシステムは別ポートの独立アプリ。ポートは /api/endpoints
+    // が返す res26_port（main.py の RES26_PORT が単一の真実）を使う。
+    fetch('/api/endpoints', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (e) {
+        document.getElementById('res26Link').href =
+          location.protocol + '//' + location.hostname + ':' + e.res26_port + '/';
+      })
+      .catch(function () {});
 
     (function () {
       var out = document.getElementById('dangerResult');
