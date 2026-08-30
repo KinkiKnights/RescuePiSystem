@@ -52,8 +52,9 @@
   .tile { background: #000; border: 1px solid #333; border-radius: 8px; overflow: hidden; position: relative; }
   .tile .vbox { width: 100%; aspect-ratio: 16 / 9; background: #000; position: relative; overflow: hidden; }
   .tile video { width: 100%; height: 100%; background: #000; object-fit: contain; display: block; }
-  /* 表示回転（KK03 など。UNIT_ROTATION で号機を指定）。配信は横長のまま、
-     表示のみ時計回り 90 度回転してタイル枠内に収める（レターボックス）。 */
+  /* 表示回転（UNIT_ROTATION で号機を指定）。配信は横長のまま、表示のみ
+     時計回り 90 度回転してタイル枠内に収める（レターボックス）。
+     現在は UNIT_ROTATION が空なので、このクラスが付くタイルは無い。 */
   .tile.rot90 .vbox { container-type: size; }
   .tile.rot90 video {
     position: absolute; top: 50%; left: 50%;
@@ -120,8 +121,12 @@ function labelOf(id) {
 }
 
 // 表示回転（表示側のみ・配信は横長のまま）。号機番号 → 時計回りの回転角（度）。
-// 現状 KK03 のみ 90 度。CSS の .tile.rot90 が実装。
-const UNIT_ROTATION = { 3: 90 };
+// カメラの取り付け向きは号機ごとの物理的な事情なので、ここで号機番号を指定して
+// 表示側だけ回す。CSS の .tile.rot90 が実装。
+//
+// 現在、回転させる号機は無い（KK03 の縦表示は解除済み）。必要になったら
+// { 3: 90 } のように号機番号 → 角度を足す。対応しているのは 90 度のみ。
+const UNIT_ROTATION = {};
 function rotationOf(id) {
   const m = id.match(/(\d+)\s*$/);
   return m ? (UNIT_ROTATION[parseInt(m[1], 10)] || 0) : 0;
