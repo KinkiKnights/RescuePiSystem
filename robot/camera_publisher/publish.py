@@ -109,11 +109,12 @@ def build_pipeline_desc():
         "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
         "webrtcbin name=sendrecv bundle-policy=max-bundle latency=0"
     ]
-    # 各ソースを共通解像度に正規化して selector.sink_<番号> へ
+    # 各ソースを共通解像度/フレームレートに正規化して selector.sink_<番号> へ
+    #   videorate はカメラ固有のfps(例 15)を共通fpsへ合わせる(無いと not-negotiated)
     for num, src in sorted(SOURCES.items()):
         parts.append(
             f"{src} ! queue max-size-buffers=2 leaky=downstream ! "
-            f"videoconvert ! videoscale ! {COMMON} ! sel.sink_{num}"
+            f"videoconvert ! videoscale ! videorate ! {COMMON} ! sel.sink_{num}"
         )
     return "  ".join(parts)
 
