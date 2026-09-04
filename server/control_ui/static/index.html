@@ -96,6 +96,7 @@
         <a class="index-link" href="/mic/">マイク集約ハブ<small>号機マイクの状態・試聴</small></a>
         <a class="index-link" href="/all-monitor">4K オールモニタ<small>2×2 統合モニタ</small></a>
         <a class="index-link" href="/control-panel">コントロールパネル<small>統合切替操作</small></a>
+        <a class="index-link" id="mftControlLink" href="#" target="_blank" rel="noopener">MFTコントロール画面<small>モニタ画面（別ポート 8002）</small></a>
       </nav>
     </main>
     <div class="index-danger">
@@ -108,6 +109,13 @@
     </div>
   </div>
   <script>
+    // MFT コントロール画面（res26_monitor_ui）は別ポート 8002 の独立アプリ。
+    // アクセス中のホスト名をそのまま使い、ポートだけ差し替える（ホスト名は固定しない）。
+    (function () {
+      var mft = document.getElementById('mftControlLink');
+      if (mft) mft.href = location.protocol + '//' + location.hostname + ':8002/';
+    })();
+
     // Res26 コントロールシステムは別ポートの独立アプリ。ポートは /api/endpoints
     // が返す res26_port（main.py の RES26_PORT が単一の真実）を使う。
     fetch('/api/endpoints', { cache: 'no-store' })
